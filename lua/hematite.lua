@@ -37,6 +37,10 @@ M._config = {
     },
     columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
     respect_gitignore = true,
+    daily_notes = {
+        date_format = nil, -- optional
+        locale = nil, -- optional, e.g. "en_US.UTF-8"
+    }
 }
 
 --==============================================================
@@ -192,6 +196,52 @@ local function is_note_file(path)
     if not ext then return false end
     ext = ext:lower()
     return ext == "md" or ext == "markdown"
+end
+
+--==============================================================
+-- Daily notes
+--==============================================================
+local function format_daily_stamp()
+    local d = M._config.daily_notes
+    if d == false then return nil end
+    if type(d) ~= "table" then d = {} end
+
+    local fmt = (type(d.date_format) == "string" and d.date_format ~= "") and d.date_format or "%Y.%b-%d"
+    local loc = (type(d.locale) == "string" and d.locale ~= "") and d.locale or nil
+
+    if not loc then
+        return os.date(fmt)
+    end
+
+    local old = os.setlocale(nil, "time")
+    os.setlocale(loc, "time")
+    local s = os.date(fmt)
+    os.setlocale(old, "time")
+    return s
+end
+
+local function open_or_create_daily(cwd, ask, done)
+    local stamp = format_daily_stamp()
+    if not stamp then
+        vim.notify("[hematite] daily notes are disabled (daily_notes=false)", vim.log.levels.WARN)
+        return done(false)
+    end
+
+    local note_full = "daily." .. stamp
+    local path = cwd .. "/" .. note_full .. ".md"
+
+    if exists(path) then
+        vim.cmd("edit " .. vim.fn.fnameescape(path))
+        return done(false)
+    end
+
+    ask("Desc (optional): ", "", function(desc)
+        desc = desc or ""
+        -- daily note: title = the date part (the obvious title)
+        write_file_if_missing(path, frontmatter_text(note_full, stamp, desc))
+        vim.cmd("edit " .. vim.fn.fnameescape(path))
+        done(true)
+    end)
 end
 
 --==============================================================
@@ -1260,6 +1310,11 @@ local function create_commands()
             return pick_vault()
         end
 
+        if sub == "daily" then
+            local cwd = active_root()
+            return open_or_create_daily(cwd, ask_cmdline, function() end)
+        end
+
         if sub == "create" then
             local cwd = active_root()
             local prefix = note_parent_prefix_from_buf(cwd)
@@ -1278,7 +1333,7 @@ local function create_commands()
     end, {
     nargs = "*",
     complete = function()
-        return { "create", "rename", "delete", "vault" }
+        return { "create", "rename", "delete", "vault", "daily" }
     end,
 })
 end
