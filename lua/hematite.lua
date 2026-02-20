@@ -16,15 +16,13 @@ local Job = safe_require("plenary.job")
 -- Config
 --==============================================================
 M._config = {
-    -- If nil or {}, Hematite uses the current working directory as the root.
-    -- Hematite uses the "active" vault (default: first).
-    vaults = {
+    vaults = { -- If nil or {}, Hematite uses the current working directory as the root. Hematite uses the "active" vault (default: first).
         {
             name = "Brain",
             path = "~/Brain/notes"
         },
         {
-            name = "test",
+            name = "Test",
             path = "~/Desktop/Test/"
         }
     },
@@ -1379,8 +1377,6 @@ M.setup = function(user_opts)
     user_opts = user_opts or {}
     local incoming = vim.deepcopy(user_opts)
 
-    -- Back-compat:
-    -- If user passed old "keymaps" single-letter table, treat it as picker_actions.
     if type(incoming.keymaps) == "table" then
         local looks_like_actions = false
         for k, v in pairs(incoming.keymaps) do
@@ -1395,7 +1391,6 @@ M.setup = function(user_opts)
         incoming.keymaps = nil
     end
 
-    -- If old shape picker_actions = { c = { "create" } }, flatten it.
     if type(incoming.picker_actions) == "table" then
         for k, v in pairs(incoming.picker_actions) do
             if type(k) == "string" and #k == 1 and type(v) == "table" then
