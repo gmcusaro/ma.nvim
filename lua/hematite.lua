@@ -1073,7 +1073,7 @@ local function navigator(cfg)
         local prefix = stack_prefix(stack)
 
         local v = M._config._active_vault
-        local has_vaults = type(M._config.vault) == "table" and #M._config.vault > 0
+        local has_vaults = type(M._config.vaults) == "table" and #M._config.vault > 0
         local vault_name = (has_vaults and v and v.name and v.name ~= "") and v.name or nil
 
         local base = vault_name and ("Hematite: " .. vault_name) or "Hematite"
