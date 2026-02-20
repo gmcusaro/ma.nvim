@@ -566,12 +566,25 @@ end
 
 local function normalize_note_full(s)
   s = trim(s or "")
-  -- allow user to type paths with slashes too; convert to dot hierarchy
+  if s == "" then return "" end
+
+  -- Normalize separators and "path-like" input
   s = s:gsub("\\", "/")
   s = s:gsub("^%./", "")
   s = s:gsub("/", ".")
+
+  -- Canonicalize whitespace to your convention
+  s = s:gsub("%s+", "-")
+
+  -- Collapse dot runs and trim dots
   s = s:gsub("%.%.+", ".")
-  s = s:gsub("^%.*", ""):gsub("%.*$", "") -- trim dots
+  s = s:gsub("^%.*", ""):gsub("%.*$", "")
+
+  -- Remove any empty segments that can remain (defensive)
+  -- e.g. ".a..b." -> "a.b"
+  s = s:gsub("%.+", ".")         -- ensure no multi-dots reappear
+  s = s:gsub("^%.", ""):gsub("%.$", "")
+
   return s
 end
 
@@ -581,9 +594,18 @@ local function create_note_flexible(cwd, prefix_hint, ask, done)
   if default ~= "" and default:sub(-1) ~= "." then default = default .. "." end
 
   ask("New note ('.' for levels, '-' for names): ", default, function(input)
-    input = input or ""
-    local note_full = normalize_note_full(input)
-    if note_full == "" then return done(false) end
+      local raw = input or ""
+      local trimmed = trim(raw)
+
+      if raw ~= "" and trimmed == "" then
+          vim.notify("Note name cannot consist only of whitespace", vim.log.levels.WARN)
+          return done(false)
+      end
+
+      local note_full = normalize_note_full(trimmed)
+      if note_full == "" then
+          return done(false)
+      end
 
     ask("Title (optional): ", title_from_note_name(note_full), function(title)
       title = trim(title)
