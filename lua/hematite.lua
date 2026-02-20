@@ -18,22 +18,16 @@ local Job = safe_require("plenary.job")
 M._config = {
     cwd = nil,
     exts = { "md", "markdown" },
-    respect_gitignore = true,
     depth = nil,
-
-    keymaps = { navigate = "<leader>nd" },
-
     delete_to_trash = true,
-
-    use_default_keymaps = true,
-    nav_keymaps = {
-        ["c"] = { "create" },
-        ["r"] = { "rename" },
-        ["d"] = { "delete" },
+    picker_actions = {
+        c = "create",
+        r = "rename",
+        d = "delete",
     },
-
     columns = { "git", "icon" },
     git_symbols = nil, -- filled on setup if missing
+    respect_gitignore = true
 }
 
 --==============================================================
@@ -951,7 +945,7 @@ local function navigator(cfg)
 
     local function results_title()
         local base = "Enter: enter/open   <BS>/`-`: back parent dir"
-        return (M._config.use_default_keymaps == false) and base or (base .. "   c/r/d: create/rename/delete")
+        return (M._config.picker_actions == false) and base or (base .. "   c/r/d: create/rename/delete")
     end
 
     local display_items = {}
@@ -1029,15 +1023,10 @@ local function navigator(cfg)
         })
     end
 
-    local function get_nav_keymaps()
-        return (M._config.use_default_keymaps == false) and {} or (M._config.nav_keymaps or {})
-    end
-
     local open_picker
 
     open_picker = function()
         local node = current_node()
-        local nav_keymaps = get_nav_keymaps()
 
         t.pickers.new({}, {
             prompt_title = title_for(),
@@ -1127,10 +1116,11 @@ local function navigator(cfg)
                 map("n", "-", function() go_up(true) end)
                 map("i", "<C-h>", function() go_up(true) end)
 
-                for key, actions_list in pairs(nav_keymaps) do
-                    if type(key) == "string" and #key == 1 and type(actions_list) == "table" then
+                local picker_actions = (M._config.picker_actions == false) and {} or (M._config.picker_actions or {})
+
+                for key, act in pairs(picker_actions) do
+                    if type(key) == "string" and #key == 1 and type(act) == "string" then
                         map("n", key, function()
-                            local act = actions_list[1]
                             if act == "create" then run_create()
                             elseif act == "rename" then run_rename()
                             elseif act == "delete" then run_delete()
@@ -1242,11 +1232,6 @@ M.setup = function(user_opts)
     end
 
     create_commands()
-
-    local km = M._config.keymaps or {}
-    if km.navigate and km.navigate ~= "" then
-        vim.keymap.set("n", km.navigate, "<cmd>Hematite<cr>", { desc = "Hematite: navigate" })
-    end
 
     local group = vim.api.nvim_create_augroup("HematiteFrontmatterUpdated", { clear = true })
     vim.api.nvim_create_autocmd("BufWritePre", {
