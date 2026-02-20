@@ -25,7 +25,10 @@ M._config = {
         r = "rename",
         d = "delete",
     },
-    columns = { "git", "icon" },
+    columns = {
+        "git",
+        "icon",
+    },
     git_symbols = nil, -- filled on setup if missing
     respect_gitignore = true
 }
@@ -197,6 +200,19 @@ end
 --==============================================================
 -- Git status map + aggregation
 --==============================================================
+local DEFAULT_GIT_SYMBOLS = {
+    clean = "  ",
+    modified = "M ",
+    added = "A ",
+    deleted = "D ",
+    renamed = "R ",
+    copied = "C ",
+    untracked = "? ",
+    ignored = "! ",
+    conflicted = "U ",
+    unknown = "~ ",
+}
+
 local function git_label_from_xy(xy)
     if not xy or xy == "" then return "clean" end
     if xy == "??" then return "untracked" end
@@ -921,9 +937,8 @@ local function navigator(cfg)
 
     local devicons = safe_require("nvim-web-devicons")
 
-    local col_list, git_override = normalize_columns(cfg.columns or M._config.columns or {})
-    local columns = col_list
-    local git_symbols = git_override or (M._config.git_symbols or {})
+    local columns, git_override = normalize_columns(cfg.columns or M._config.columns or {})
+    local git_symbols = git_override or DEFAULT_GIT_SYMBOLS
 
     local stack = {}
     local cwd, root = scan_notes_tree(cfg)
@@ -976,7 +991,14 @@ local function navigator(cfg)
     local function git_for(v)
         if v.kind == "back" then return "" end
         local label = v.git or "clean"
-        return git_symbols[label] or git_symbols.unknown or "~ "
+
+        if git_override then
+            -- custom set: if missing, show nothing
+            return git_symbols[label] or ""
+        end
+
+        -- default set: fallback to unknown if missing (shouldn’t happen)
+        return git_symbols[label] or git_symbols.unknown or ""
     end
 
     local function make_display(v)
@@ -1195,19 +1217,6 @@ end
 M.setup = function(user_opts)
     user_opts = user_opts or {}
     local incoming = vim.deepcopy(user_opts)
-
-    local DEFAULT_GIT_SYMBOLS = {
-        clean = "  ",
-        modified = "M ",
-        added = "A ",
-        deleted = "D ",
-        renamed = "R ",
-        copied = "C ",
-        untracked = "? ",
-        ignored = "! ",
-        conflicted = "U ",
-        unknown = "~ ",
-    }
 
     -- If keymaps are single-letter keys, treat them as nav_keymaps, not leader mappings.
     if type(incoming.keymaps) == "table" then
