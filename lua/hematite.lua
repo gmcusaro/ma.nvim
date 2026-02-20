@@ -20,7 +20,7 @@ M._config = {
     -- Hematite uses the "active" vault (default: first).
     vaults = {
         {
-            name = "personal",
+            name = "Brain",
             path = "~/Brain/notes"
         },
         {
@@ -31,15 +31,15 @@ M._config = {
     depth = nil,
     delete_to_trash = true,
     picker_actions = {
-        c = "create",
-        r = "rename",
-        d = "delete",
+        { "c", "create" },
+        { "r", "rename" },
+        { "d", "delete" },
     },
     columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
     respect_gitignore = true,
     daily_notes = {
-        date_format = nil, -- optional
-        locale = nil, -- optional, e.g. "en_US.UTF-8"
+        date_format = nil, -- optional, default ``
+        locale = nil, -- optional, default current locale
     }
 }
 
@@ -1080,9 +1080,46 @@ local function navigator(cfg)
         return (prefix == "") and base or (base .. " · " .. prefix)
     end
 
+    local function picker_actions_list()
+        local pa = M._config.picker_actions
+        if pa == false then return {} end
+        if type(pa) ~= "table" then return {} end
+
+        local out = {}
+        if vim.tbl_islist(pa) then
+            -- ordered: { {"c","create"}, {"r","rename"} }
+            for _, it in ipairs(pa) do
+                local k, act = it[1], it[2]
+                if type(k) == "string" and #k == 1 and type(act) == "string" and act ~= "" then
+                    out[#out + 1] = { k = k, act = act }
+                end
+            end
+            return out
+        end
+
+        -- legacy map form: stable order by key
+        for k, act in pairs(pa) do
+            if type(k) == "string" and #k == 1 and type(act) == "string" and act ~= "" then
+                out[#out + 1] = { k = k, act = act }
+            end
+        end
+        table.sort(out, function(a, b) return a.k < b.k end)
+        return out
+    end
+
     local function results_title()
-        local base = "Enter: enter/open   <BS>/`-`: back parent dir"
-        return (M._config.picker_actions == false) and base or (base .. "   c/r/d: create/rename/delete")
+        local parts = { "Enter: open", "<BS>/`-`: back parent dir" }
+
+        local acts = picker_actions_list()
+        if #acts > 0 then
+            local labels = {}
+            for _, it in ipairs(acts) do
+                labels[#labels + 1] = ("%s: %s"):format(it.k, it.act)
+            end
+            parts[#parts + 1] = "[" .. table.concat(labels, ", ") .. "]"
+        end
+
+        return table.concat(parts, ", ")
     end
 
     local display_items = {}
@@ -1258,16 +1295,13 @@ local function navigator(cfg)
                 map("n", "-", function() go_up(true) end)
                 map("i", "<C-h>", function() go_up(true) end)
 
-                local picker_actions = (M._config.picker_actions == false) and {} or (M._config.picker_actions or {})
-                for key, act in pairs(picker_actions) do
-                    if type(key) == "string" and #key == 1 and type(act) == "string" then
-                        map("n", key, function()
-                            if act == "create" then run_create()
-                            elseif act == "rename" then run_rename()
-                            elseif act == "delete" then run_delete()
-                            end
-                        end)
-                    end
+                for _, it in ipairs(picker_actions_list()) do
+                    map("n", it.k, function()
+                        if it.act == "create" then run_create()
+                        elseif it.act == "rename" then run_rename()
+                        elseif it.act == "delete" then run_delete()
+                        end
+                    end)
                 end
 
                 return true
