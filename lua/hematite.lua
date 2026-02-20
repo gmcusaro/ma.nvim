@@ -16,8 +16,18 @@ local Job = safe_require("plenary.job")
 -- Config
 --==============================================================
 M._config = {
-    cwd = nil,
-    exts = { "md", "markdown" },
+    -- If nil or {}, Hematite uses the current working directory as the root.
+    -- Hematite uses the "active" vault (default: first).
+    vaults = {
+        {
+            name = "personal",
+            path = "~/Brain/notes"
+        },
+        {
+            name = "test",
+            path = "~/Desktop/Test/"
+        }
+    },
     depth = nil,
     delete_to_trash = true,
     picker_actions = {
@@ -25,12 +35,8 @@ M._config = {
         r = "rename",
         d = "delete",
     },
-    columns = {
-        "git",
-        "icon",
-    },
-    git_symbols = nil, -- filled on setup if missing
-    respect_gitignore = true
+    columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
+    respect_gitignore = true,
 }
 
 --==============================================================
@@ -103,6 +109,36 @@ local function is_under(path, root)
 end
 
 --==============================================================
+-- Vault utils
+--==============================================================
+local function trim(s)
+    return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function normalize_vaults(vault)
+    if type(vault) ~= "table" or vim.tbl_isempty(vault) then return nil end
+    local out = {}
+    for _, v in ipairs(vault) do
+        if type(v) == "table" and type(v.path) == "string" and v.path ~= "" then
+            local p = normpath(v.path)
+            if p and p ~= "" then
+                out[#out + 1] = {
+                    name = (type(v.name) == "string" and v.name ~= "") and v.name or p,
+                    path = p,
+                }
+            end
+        end
+    end
+    return (#out > 0) and out or nil
+end
+
+local function active_root()
+    local v = M._config._active_vault
+    if v and v.path and v.path ~= "" then return v.path end
+    return normpath(vim.fn.getcwd())
+end
+
+--==============================================================
 -- Note/frontmatter utils
 --==============================================================
 local function now_ms()
@@ -124,7 +160,11 @@ end
 
 local function title_from_note_name(note_full)
     local last = note_full:match("([^.]+)$") or note_full
-    local s = (last or ""):gsub("[%-%_]+", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    local s = (last or "")
+    :gsub("[%-%_]+", " ")
+    :gsub("%s+", " ")
+    :gsub("^%s+", "")
+    :gsub("%s+$", "")
     if s == "" then return "Untitled" end
     return s:sub(1, 1):upper() .. s:sub(2)
 end
@@ -146,18 +186,12 @@ local function frontmatter_text(note_full, title, desc)
     }, "\n")
 end
 
-local function trim(s)
-    return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
-end
-
-local function is_note_file(path, exts)
+-- Always md/markdown now (removed exts option)
+local function is_note_file(path)
     local ext = path:match("%.([^.]+)$")
     if not ext then return false end
     ext = ext:lower()
-    for _, e in ipairs(exts or {}) do
-        if ext == e then return true end
-    end
-    return false
+    return ext == "md" or ext == "markdown"
 end
 
 --==============================================================
@@ -418,7 +452,6 @@ local function scan_notes_tree(cfg)
     end
 
     local cwd = normpath(cfg.cwd) or normpath(vim.fn.getcwd())
-    local exts = cfg.exts or { "md", "markdown" }
     local respect_gitignore = (cfg.respect_gitignore ~= false)
 
     local cols = normalize_columns(cfg.columns or M._config.columns or {})
@@ -438,7 +471,7 @@ local function scan_notes_tree(cfg)
 
     local files = {}
     for _, abs in ipairs(paths) do
-        if is_note_file(abs, exts) then
+        if is_note_file(abs) then
             abs = normpath(abs) or abs
             local rel = abs
             local pobj = P(abs)
@@ -578,21 +611,13 @@ local function normalize_note_full(s)
     s = trim(s or "")
     if s == "" then return "" end
 
-    -- Normalize separators and "path-like" input
     s = s:gsub("\\", "/")
     s = s:gsub("^%./", "")
     s = s:gsub("/", ".")
-
-    -- Canonicalize whitespace to your convention
     s = s:gsub("%s+", "-")
-
-    -- Collapse dot runs and trim dots
     s = s:gsub("%.%.+", ".")
     s = s:gsub("^%.*", ""):gsub("%.*$", "")
-
-    -- Remove any empty segments that can remain (defensive)
-    -- e.g. ".a..b." -> "a.b"
-    s = s:gsub("%.+", ".")         -- ensure no multi-dots reappear
+    s = s:gsub("%.+", ".")
     s = s:gsub("^%.", ""):gsub("%.$", "")
 
     return s
@@ -632,12 +657,11 @@ local function create_note_flexible(cwd, prefix_hint, ask, done)
     end)
 end
 
--- For :Hematite create: use current open note nesting (parent prefix) if applicable
 local function note_parent_prefix_from_buf(cwd)
     local path = vim.api.nvim_buf_get_name(0)
     if path == "" then return "" end
     if not is_under(path, cwd) then return "" end
-    if not is_note_file(path, M._config.exts or {}) then return "" end
+    if not is_note_file(path) then return "" end
 
     local base = (path:match("([^/]+)$") or path):gsub("%.[^.]+$", "")
     local parts = split_dots(base)
@@ -782,24 +806,23 @@ function actions.delete(selection, on_done)
     on_done(true)
 end
 
--- Current-buffer rename/delete for :Hematite rename/delete
 local function current_note_path_if_managed()
-    local root = normpath(M._config.cwd) or normpath(vim.fn.getcwd())
+    local root = active_root()
     local file = vim.api.nvim_buf_get_name(0)
     if file == "" then return nil end
     if not is_under(file, root) then return nil end
-    if not is_note_file(file, M._config.exts or {}) then return nil end
+    if not is_note_file(file) then return nil end
     return normpath(file) or file
 end
 
 function actions.rename_current_buffer()
     local path = current_note_path_if_managed()
     if not path then
-        vim.notify("[hematite] current buffer is not a managed note under cwd", vim.log.levels.WARN)
+        vim.notify("[hematite] current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
         return
     end
 
-    local cwd = normpath(M._config.cwd) or normpath(vim.fn.getcwd())
+    local cwd = active_root()
     local base = (path:match("([^/]+)$") or path):gsub("%.[^.]+$", "")
 
     vim.ui.input({
@@ -827,7 +850,7 @@ end
 function actions.delete_current_buffer()
     local path = current_note_path_if_managed()
     if not path then
-        vim.notify("[hematite] current buffer is not a managed note under cwd", vim.log.levels.WARN)
+        vim.notify("[hematite] current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
         return
     end
 
@@ -928,6 +951,49 @@ local function safe_previewer(t)
     return nil
 end
 
+-- Vault picker: :Hematite vault
+local function pick_vault()
+    local t = telescope_deps()
+    if not t then
+        vim.notify("[hematite] telescope.nvim is required", vim.log.levels.ERROR)
+        return
+    end
+
+    local vaults = normalize_vaults(M._config.vaults)
+    if not vaults then
+        vim.notify("[hematite] no vaults configured", vim.log.levels.WARN)
+        return
+    end
+
+    t.pickers.new({}, {
+        prompt_title = "Hematite: vault",
+        finder = t.finders.new_table({
+            results = vaults,
+            entry_maker = function(v)
+                return {
+                    value = v,
+                    ordinal = (v.name or "") .. " " .. (v.path or ""),
+                    display = v.name or v.path,
+                }
+            end,
+        }),
+        sorter = t.conf.generic_sorter({}),
+        attach_mappings = function(bufnr, map)
+            local function choose()
+                local sel = t.action_state.get_selected_entry()
+                local v = sel and sel.value
+                if not v then return end
+                t.actions.close(bufnr)
+                M._config._active_vault = v
+                vim.schedule(function() M.navigate() end)
+            end
+            map("i", "<CR>", choose)
+            map("n", "<CR>", choose)
+            return true
+        end,
+    }):find()
+end
+
 local function navigator(cfg)
     local t = telescope_deps()
     if not t then
@@ -955,7 +1021,13 @@ local function navigator(cfg)
 
     local function title_for()
         local prefix = stack_prefix(stack)
-        return (prefix == "") and "Hematite" or ("Hematite: " .. prefix)
+
+        local v = M._config._active_vault
+        local has_vaults = type(M._config.vault) == "table" and #M._config.vault > 0
+        local vault_name = (has_vaults and v and v.name and v.name ~= "") and v.name or nil
+
+        local base = vault_name and ("Hematite: " .. vault_name) or "Hematite"
+        return (prefix == "") and base or (base .. " · " .. prefix)
     end
 
     local function results_title()
@@ -993,11 +1065,9 @@ local function navigator(cfg)
         local label = v.git or "clean"
 
         if git_override then
-            -- custom set: if missing, show nothing
             return git_symbols[label] or ""
         end
 
-        -- default set: fallback to unknown if missing (shouldn’t happen)
         return git_symbols[label] or git_symbols.unknown or ""
     end
 
@@ -1107,7 +1177,7 @@ local function navigator(cfg)
 
                 local function run_create()
                     t.actions.close(bufnr)
-                    local prefix = stack_prefix(stack) -- telescope uses displayed nesting as a hint
+                    local prefix = stack_prefix(stack)
                     vim.schedule(function()
                         create_note_flexible(cwd, prefix, ask_ui, done)
                     end)
@@ -1139,7 +1209,6 @@ local function navigator(cfg)
                 map("i", "<C-h>", function() go_up(true) end)
 
                 local picker_actions = (M._config.picker_actions == false) and {} or (M._config.picker_actions or {})
-
                 for key, act in pairs(picker_actions) do
                     if type(key) == "string" and #key == 1 and type(act) == "string" then
                         map("n", key, function()
@@ -1165,8 +1234,7 @@ end
 function M._runtime_cfg()
     local cfg = M._config
     return {
-        cwd = normpath(cfg.cwd) or normpath(vim.fn.getcwd()),
-        exts = cfg.exts,
+        cwd = active_root(),
         respect_gitignore = cfg.respect_gitignore,
         depth = cfg.depth,
         columns = cfg.columns,
@@ -1188,9 +1256,13 @@ local function create_commands()
             return M.navigate()
         end
 
+        if sub == "vault" then
+            return pick_vault()
+        end
+
         if sub == "create" then
-            local cwd = normpath(M._config.cwd) or normpath(vim.fn.getcwd())
-            local prefix = note_parent_prefix_from_buf(cwd) -- command uses open file nesting
+            local cwd = active_root()
+            local prefix = note_parent_prefix_from_buf(cwd)
             return create_note_flexible(cwd, prefix, ask_cmdline, function() end)
         end
 
@@ -1206,7 +1278,7 @@ local function create_commands()
     end, {
     nargs = "*",
     complete = function()
-        return { "create", "rename", "delete" }
+        return { "create", "rename", "delete", "vault" }
     end,
 })
 end
@@ -1218,26 +1290,36 @@ M.setup = function(user_opts)
     user_opts = user_opts or {}
     local incoming = vim.deepcopy(user_opts)
 
-    -- If keymaps are single-letter keys, treat them as nav_keymaps, not leader mappings.
+    -- Back-compat:
+    -- If user passed old "keymaps" single-letter table, treat it as picker_actions.
     if type(incoming.keymaps) == "table" then
-        local looks_like_nav = false
+        local looks_like_actions = false
         for k, v in pairs(incoming.keymaps) do
-            if type(k) == "string" and #k == 1 and type(v) == "table" then
-                looks_like_nav = true
+            if type(k) == "string" and #k == 1 and (type(v) == "string" or type(v) == "table") then
+                looks_like_actions = true
                 break
             end
         end
-        if looks_like_nav then
-            incoming.nav_keymaps = incoming.keymaps
-            incoming.keymaps = nil
+        if looks_like_actions and incoming.picker_actions == nil then
+            incoming.picker_actions = incoming.keymaps
+        end
+        incoming.keymaps = nil
+    end
+
+    -- If old shape picker_actions = { c = { "create" } }, flatten it.
+    if type(incoming.picker_actions) == "table" then
+        for k, v in pairs(incoming.picker_actions) do
+            if type(k) == "string" and #k == 1 and type(v) == "table" then
+                incoming.picker_actions[k] = v[1]
+            end
         end
     end
 
     M._config = vim.tbl_deep_extend("force", M._config, incoming)
-    M._config.cwd = normpath(M._config.cwd)
 
-    if type(M._config.git_symbols) ~= "table" then
-        M._config.git_symbols = DEFAULT_GIT_SYMBOLS
+    M._config.vaults = normalize_vaults(M._config.vaults)
+    if not M._config._active_vault then
+        M._config._active_vault = (M._config.vaults and M._config.vaults[1]) or nil
     end
 
     create_commands()
@@ -1247,7 +1329,7 @@ M.setup = function(user_opts)
         group = group,
         pattern = { "*.md", "*.markdown" },
         callback = function(ev)
-            local root = normpath(M._config.cwd) or normpath(vim.fn.getcwd())
+            local root = active_root()
             local file = ev.match or vim.api.nvim_buf_get_name(ev.buf)
             if not is_under(file, root) then return end
             update_frontmatter_updated(ev.buf)
