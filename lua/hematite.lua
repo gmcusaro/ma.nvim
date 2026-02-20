@@ -36,7 +36,7 @@ M._config = {
     columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
     respect_gitignore = true,
     daily_notes = {
-        date_format = nil, -- optional, default ``
+        date_format = nil, -- optional, default `%Y.%b-%d`
         locale = nil, -- optional, default current locale
     }
 }
