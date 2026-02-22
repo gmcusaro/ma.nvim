@@ -62,8 +62,11 @@ local function P(p)
 end
 
 local function exists(p)
-    local o = P(p)
-    return o and o.exists and o:exists() or false
+    if not p or p == "" then return false end
+    local uv = vim.uv or vim.loop
+    local np = normpath(p)
+    if not np then return false end
+    return uv.fs_stat(np) ~= nil
 end
 
 local function mkdir_parent(p)
@@ -147,11 +150,17 @@ local function now_ms()
     return math.floor(os.time() * 1000)
 end
 
+-- Seed math.random once (do NOT reseed per id)
+do
+    local _uv = vim.uv or vim.loop
+    local seed = (_uv and _uv.hrtime and _uv.hrtime() or os.time()) % 2147483647
+    math.randomseed(seed)
+    math.random(); math.random(); math.random()
+end
+
 local function nanoid_like(len)
     len = len or 23
     local alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-    local seed = (vim.uv or vim.loop).hrtime() % 2147483647
-    math.randomseed(seed)
     local out = {}
     for _ = 1, len do
         local idx = math.random(1, #alphabet)
@@ -194,52 +203,6 @@ local function is_note_file(path)
     if not ext then return false end
     ext = ext:lower()
     return ext == "md" or ext == "markdown"
-end
-
---==============================================================
--- Daily notes
---==============================================================
-local function format_daily_stamp()
-    local d = M._config.daily_notes
-    if d == false then return nil end
-    if type(d) ~= "table" then d = {} end
-
-    local fmt = (type(d.date_format) == "string" and d.date_format ~= "") and d.date_format or "%Y.%b-%d"
-    local loc = (type(d.locale) == "string" and d.locale ~= "") and d.locale or nil
-
-    if not loc then
-        return os.date(fmt)
-    end
-
-    local old = os.setlocale(nil, "time")
-    os.setlocale(loc, "time")
-    local s = os.date(fmt)
-    os.setlocale(old, "time")
-    return s
-end
-
-local function open_or_create_daily(cwd, ask, done)
-    local stamp = format_daily_stamp()
-    if not stamp then
-        vim.notify("[hematite] daily notes are disabled (daily_notes=false)", vim.log.levels.WARN)
-        return done(false)
-    end
-
-    local note_full = "daily." .. stamp
-    local path = cwd .. "/" .. note_full .. ".md"
-
-    if exists(path) then
-        vim.cmd("edit " .. vim.fn.fnameescape(path))
-        return done(false)
-    end
-
-    ask("Desc (optional): ", "", function(desc)
-        desc = desc or ""
-        -- daily note: title = the date part (the obvious title)
-        write_file_if_missing(path, frontmatter_text(note_full, stamp, desc))
-        vim.cmd("edit " .. vim.fn.fnameescape(path))
-        done(true)
-    end)
 end
 
 --==============================================================
@@ -474,23 +437,23 @@ local function stack_prefix(stack)
 end
 
 local function normalize_columns(columns)
-    if type(columns) ~= "table" then return {}, nil end
-    local git_override = (type(columns.git) == "table") and columns.git or nil
-    local out, seen = {}, {}
+    local spec = { cols = {}, git_override = nil }
+    if type(columns) ~= "table" then return spec end
 
-    if git_override then
-        out[#out + 1] = "git"
-        seen.git = true
+    if type(columns.git) == "table" then
+        spec.git_override = columns.git
+        spec.cols[#spec.cols + 1] = "git"
     end
 
+    local seen = { git = (spec.git_override ~= nil) }
     for _, c in ipairs(columns) do
         if type(c) == "string" and c ~= "" and not seen[c] then
-            out[#out + 1] = c
+            spec.cols[#spec.cols + 1] = c
             seen[c] = true
         end
     end
 
-    return out, git_override
+    return spec
 end
 
 local function scan_notes_tree(cfg)
@@ -502,9 +465,9 @@ local function scan_notes_tree(cfg)
     local cwd = normpath(cfg.cwd) or normpath(vim.fn.getcwd())
     local respect_gitignore = (cfg.respect_gitignore ~= false)
 
-    local cols = normalize_columns(cfg.columns or M._config.columns or {})
+    local colspec = normalize_columns(cfg.columns or M._config.columns or {})
     local need_git = false
-    for _, c in ipairs(cols) do
+    for _, c in ipairs(colspec.cols) do
         if c == "git" then need_git = true break end
     end
 
@@ -671,38 +634,156 @@ local function normalize_note_full(s)
     return s
 end
 
-local function create_note_flexible(cwd, prefix_hint, ask, done)
-    prefix_hint = trim(prefix_hint or "")
-    local default = prefix_hint
-    if default ~= "" and default:sub(-1) ~= "." then default = default .. "." end
+--==============================================================
+-- Create helpers (prompting + file ensure + open)
+--==============================================================
+local function open_path(path)
+    if not path or path == "" then return end
+    vim.cmd("edit " .. vim.fn.fnameescape(path))
+end
 
-    ask("New note ('.' for levels, '-' for names): ", default, function(input)
+local function note_path(cwd, note_full)
+    return cwd .. "/" .. note_full .. ".md"
+end
+
+local function default_from_prefix(prefix_hint)
+    prefix_hint = trim(prefix_hint or "")
+    if prefix_hint == "" then return "" end
+    return (prefix_hint:sub(-1) == ".") and prefix_hint or (prefix_hint .. ".")
+end
+
+local function prompt_note_full(ask, default, cb)
+    ask("New note ('.' for levels, '-' for names): ", default or "", function(input)
         local raw = input or ""
         local trimmed = trim(raw)
 
+        -- user typed only whitespace -> treat as invalid input, keep UI consistent
         if raw ~= "" and trimmed == "" then
             vim.notify("Note name cannot consist only of whitespace", vim.log.levels.WARN)
-            return done(false)
+            return cb(nil)
         end
 
         local note_full = normalize_note_full(trimmed)
-        if note_full == "" then
-            return done(false)
-        end
-
-        ask("Title (optional): ", title_from_note_name(note_full), function(title)
-            title = trim(title)
-            if title == "" then title = title_from_note_name(note_full) end
-
-            ask("Desc (optional): ", "", function(desc)
-                desc = desc or ""
-                local path = cwd .. "/" .. note_full .. ".md"
-                write_file_if_missing(path, frontmatter_text(note_full, title, desc))
-                vim.cmd("edit " .. vim.fn.fnameescape(path))
-                done(true)
-            end)
-        end)
+        if note_full == "" then return cb(nil) end
+        cb(note_full)
     end)
+end
+
+local function prompt_title(ask, note_full, cb)
+    local suggested = title_from_note_name(note_full)
+    ask("Title (optional): ", suggested, function(title)
+        title = trim(title)
+        cb((title ~= "" and title) or suggested)
+    end)
+end
+local function prompt_desc(ask, cb)
+    ask("Desc (optional): ", "", function(desc)
+        cb(desc or "")
+    end)
+end
+
+local function ensure_note_file(path, note_full, title, desc)
+    return write_file_if_missing(path, frontmatter_text(note_full, title, desc))
+end
+
+-- Generic: create/open a note with pluggable prompt steps.
+-- opts:
+--   note_full: string|nil  (if nil, prompts for it)
+--   title: string|nil      (if nil, prompts for it)
+--   ask_desc: boolean      (if false, skips desc prompt)
+--   prefix_hint: string|nil (used only when prompting note_full)
+local function open_or_create_note(opts, cwd, ask, done)
+    opts = opts or {}
+    local function finish(note_full, title, desc)
+        local path = note_path(cwd, note_full)
+        local created = ensure_note_file(path, note_full, title, desc or "")
+        open_path(path)
+        done(created)
+    end
+
+    local function with_desc(note_full, title)
+        if opts.ask_desc == false then
+            return finish(note_full, title, "")
+        end
+        prompt_desc(ask, function(desc)
+            finish(note_full, title, desc)
+        end)
+    end
+
+    local function with_title(note_full)
+        if opts.title and opts.title ~= "" then
+            return with_desc(note_full, opts.title)
+        end
+        prompt_title(ask, note_full, function(title)
+            with_desc(note_full, title)
+        end)
+    end
+
+    local function with_note_full()
+        if opts.note_full and opts.note_full ~= "" then
+            return with_title(opts.note_full)
+        end
+        local default = default_from_prefix(opts.prefix_hint)
+        prompt_note_full(ask, default, function(note_full)
+            if not note_full then return done(false) end
+            with_title(note_full)
+        end)
+    end
+
+    with_note_full()
+end
+
+-- Public create (flexible UI adapter)
+local function create_note_flexible(cwd, prefix_hint, ask, done)
+    open_or_create_note({ prefix_hint = prefix_hint, ask_desc = true }, cwd, ask, done)
+end
+
+--==============================================================
+-- Daily notes
+--==============================================================
+local function format_daily_stamp()
+    local d = M._config.daily_notes
+    if d == false then return nil end
+    if type(d) ~= "table" then d = {} end
+
+    local fmt = (type(d.date_format) == "string" and d.date_format ~= "") and d.date_format or "%Y.%b-%d"
+    local loc = (type(d.locale) == "string" and d.locale ~= "") and d.locale or nil
+
+    if not loc then
+        return os.date(fmt)
+    end
+
+    local old = os.setlocale(nil, "time")
+    os.setlocale(loc, "time")
+    local s = os.date(fmt)
+    os.setlocale(old, "time")
+    return s
+end
+
+local function daily_note_full_and_stamp()
+    local stamp = format_daily_stamp()
+    if not stamp then return nil, nil end
+    return "daily." .. stamp, stamp
+end
+
+local function open_or_create_daily(cwd, ask, done)
+    local note_full, stamp = daily_note_full_and_stamp()
+    if not note_full then
+        vim.notify("[hematite] daily notes are disabled (daily_notes=false)", vim.log.levels.WARN)
+        return done(false)
+    end
+
+    local path = note_path(cwd, note_full)
+    if exists(path) then
+        open_path(path)
+        return done(false)
+    end
+
+    open_or_create_note({
+        note_full = note_full,
+        title = stamp,
+        ask_desc = true,
+    }, cwd, ask, done)
 end
 
 local function note_parent_prefix_from_buf(cwd)
@@ -917,7 +998,8 @@ end
 local function telescope_deps()
     local pickers = safe_require("telescope.pickers")
     local finders = safe_require("telescope.finders")
-    local conf = safe_require("telescope.config") and require("telescope.config").values or nil
+    local cfgmod = safe_require("telescope.config")
+    local conf = cfgmod and cfgmod.values or nil
     local entry_display = safe_require("telescope.pickers.entry_display")
     local actions_t = safe_require("telescope.actions")
     local action_state = safe_require("telescope.actions.state")
@@ -1051,8 +1133,10 @@ local function navigator(cfg)
 
     local devicons = safe_require("nvim-web-devicons")
 
-    local columns, git_override = normalize_columns(cfg.columns or M._config.columns or {})
-    local git_symbols = git_override or DEFAULT_GIT_SYMBOLS
+    local colspec = normalize_columns(cfg.columns or M._config.columns or {})
+    local columns = colspec.cols
+    local git_symbols = colspec.git_override or DEFAULT_GIT_SYMBOLS
+    local git_override = colspec.git_override
 
     local stack = {}
     local cwd, root = scan_notes_tree(cfg)
@@ -1105,19 +1189,18 @@ local function navigator(cfg)
         return out
     end
 
-    local function results_title()
-        local parts = { "Enter: open", "<BS>/`-`: back parent dir" }
+    local ACTIONS = picker_actions_list()
 
-        local acts = picker_actions_list()
-        if #acts > 0 then
+    local function results_title()
+        local results_parts = { "Enter: open", "<BS>/`-`: back parent dir" }
+        if #ACTIONS > 0 then
             local labels = {}
-            for _, it in ipairs(acts) do
+            for _, it in ipairs(ACTIONS) do
                 labels[#labels + 1] = ("%s: %s"):format(it.k, it.act)
             end
-            parts[#parts + 1] = "[" .. table.concat(labels, ", ") .. "]"
+            results_parts[#results_parts + 1] = "[" .. table.concat(labels, ", ") .. "]"
         end
-
-        return table.concat(parts, ", ")
+        return table.concat(results_parts, ", ")
     end
 
     local display_items = {}
@@ -1130,30 +1213,28 @@ local function navigator(cfg)
 
     local displayer = t.entry_display.create({ separator = " ", items = display_items })
 
-    local function file_icon(path, fallback_name)
+    local function icon_for(v)
+        if v.kind == "folder" then return "" end
         if devicons and devicons.get_icon then
-            local filename = path and path:match("([^/\\]+)$") or (fallback_name .. ".md")
+            local filename = v.path and v.path:match("([^/\\]+)$") or (v.name .. ".md")
             local ext = filename:match("%.([^.]+)$") or ""
             return devicons.get_icon(filename, ext, { default = true }) or "󰈙"
         end
         return "󰈙"
     end
 
-    local function icon_for(v)
-        if v.kind == "back" then return "" end
-        if v.kind == "folder" then return "" end
-        return file_icon(v.path, v.name)
-    end
-
-    local function git_for(v)
-        if v.kind == "back" then return "" end
-        local label = v.git or "clean"
-
-        if git_override then
-            return git_symbols[label] or ""
+    local git_for
+    if git_override then
+        git_for = function(v)
+            if v.kind == "back" then return "" end
+            return (git_symbols[v.git or "clean"] or "")
         end
-
-        return git_symbols[label] or git_symbols.unknown or ""
+    else
+        local unknown = git_symbols.unknown or ""
+        git_for = function(v)
+            if v.kind == "back" then return "" end
+            return (git_symbols[v.git or "clean"] or unknown)
+        end
     end
 
     local function make_display(v)
@@ -1260,11 +1341,15 @@ local function navigator(cfg)
                     open_picker()
                 end
 
+                local function done_no_reopen(changed)
+                    if changed then rescan() end
+                end
+
                 local function run_create()
                     t.actions.close(bufnr)
                     local prefix = stack_prefix(stack)
                     vim.schedule(function()
-                        create_note_flexible(cwd, prefix, ask_ui, done)
+                        create_note_flexible(cwd, prefix, ask_ui, done_no_reopen)
                     end)
                 end
 
@@ -1293,7 +1378,7 @@ local function navigator(cfg)
                 map("n", "-", function() go_up(true) end)
                 map("i", "<C-h>", function() go_up(true) end)
 
-                for _, it in ipairs(picker_actions_list()) do
+                for _, it in ipairs(ACTIONS) do
                     map("n", it.k, function()
                         if it.act == "create" then run_create()
                         elseif it.act == "rename" then run_rename()
