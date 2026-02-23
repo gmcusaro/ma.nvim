@@ -738,10 +738,8 @@ local function prompt_note_meta(opts, ask, cb)
     with_note_full()
 end
 
--- Creates a note file (writes frontmatter if missing). Does NOT open.
--- opts:
---   refuse_overwrite: boolean (default true)
--- Returns: created:boolean, path:string
+-- Creates a note file with frontmatter if the file does not exist.
+-- Does NOT modify existing files.
 local function create_note_file(cwd, note_full, title, desc, opts)
     opts = opts or {}
     local refuse_overwrite = (opts.refuse_overwrite ~= false) -- default true
@@ -749,7 +747,6 @@ local function create_note_file(cwd, note_full, title, desc, opts)
     local path = note_path(cwd, note_full)
 
     if refuse_overwrite and exists(path) then
-        -- Explicitly refuse to overwrite regardless of write_file_if_missing implementation.
         return false, path
     end
 
@@ -769,7 +766,6 @@ end
 local function open_or_create_note(opts, cwd, ask, done)
     opts = opts or {}
 
-    -- If caller provided note_full, try open first without prompting.
     if opts.note_full and opts.note_full ~= "" then
         local opened, path = open_existing_note(cwd, opts.note_full)
         if opened then
@@ -780,7 +776,6 @@ local function open_or_create_note(opts, cwd, ask, done)
                 note_full = opts.note_full,
             })
         end
-        -- else: fall through to prompt remaining fields and create
     end
 
     prompt_note_meta(opts, ask, function(note_full, title, desc)
@@ -795,7 +790,6 @@ local function open_or_create_note(opts, cwd, ask, done)
 
         local created, path = create_note_file(cwd, note_full, title, desc, { refuse_overwrite = true })
 
-        -- If we refused overwrite or file already exists now, open it (same UX).
         local opened, _ = open_existing_note(cwd, note_full)
 
         return done({
@@ -809,11 +803,9 @@ local function open_or_create_note(opts, cwd, ask, done)
     end)
 end
 
--- Public create (flexible UI adapter)
 local function create_note_flexible(cwd, prefix_hint, ask, done)
     maybe_chdir_to_active_root()
     open_or_create_note({ prefix_hint = prefix_hint, ask_desc = true }, cwd, ask, function(res)
-        -- preserve previous contract: done(created:boolean)
         done(res and res.created or false)
     end)
 end
@@ -854,9 +846,6 @@ local function open_or_create_daily(cwd, ask, done)
         return done(false)
     end
 
-    -- Daily behavior:
-    -- - if exists: open it, no prompts
-    -- - else: create it (note_full fixed, title fixed to stamp), still prompt desc (as before)
     open_or_create_note({
         note_full = note_full,
         title = stamp,
@@ -893,7 +882,6 @@ local function get_visual_selection_range_and_text()
     local erow, ecol = ep[2], ep[3] -- 1-based, inclusive
     if not (srow and scol and erow and ecol) then return nil end
 
-    -- normalize order
     if erow < srow or (erow == srow and ecol < scol) then
         srow, erow = erow, srow
         scol, ecol = ecol, scol
@@ -901,9 +889,6 @@ local function get_visual_selection_range_and_text()
 
     local srow0, scol0 = srow - 1, math.max(0, scol - 1)
     local erow0 = erow - 1
-
-    -- nvim_buf_get_text end_col is 0-based EXCLUSIVE.
-    -- getpos gives ecol as 1-based INCLUSIVE -> end_excl = ecol
     local ecol_excl = math.max(0, ecol)
 
     -- clamp end col to last line length (handles linewise selections / huge ecol)
@@ -1263,13 +1248,11 @@ local function safe_previewer(t)
     return nil
 end
 
--- config: M._config.initial_mode = "normal" | "insert"
 local function hematite_initial_mode()
     local m = M._config.telescope_initial_mode
     return (m == "normal" or m == "insert") and m or "insert"
 end
 
--- Vault picker: :Hematite vault
 local function pick_vault()
     local t = telescope_deps()
     if not t then
