@@ -28,6 +28,7 @@ M._config = {
     },
     depth = nil,
     delete_to_trash = true,
+    telescope_initial_mode = "normal",  -- or "insert"
     picker_actions = {
         { "c", "create" },
         { "r", "rename" },
@@ -686,27 +687,18 @@ local function ensure_note_file(path, note_full, title, desc)
     return write_file_if_missing(path, frontmatter_text(note_full, title, desc))
 end
 
--- Generic: create/open a note with pluggable prompt steps.
--- opts:
---   note_full: string|nil  (if nil, prompts for it)
---   title: string|nil      (if nil, prompts for it)
---   ask_desc: boolean      (if false, skips desc prompt)
---   prefix_hint: string|nil (used only when prompting note_full)
-local function open_or_create_note(opts, cwd, ask, done)
+--==============================================================
+-- Create / Open separation (small, focused functions)
+--==============================================================
+local function prompt_note_meta(opts, ask, cb)
     opts = opts or {}
-    local function finish(note_full, title, desc)
-        local path = note_path(cwd, note_full)
-        local created = ensure_note_file(path, note_full, title, desc or "")
-        open_path(path)
-        done(created)
-    end
 
     local function with_desc(note_full, title)
         if opts.ask_desc == false then
-            return finish(note_full, title, "")
+            return cb(note_full, title, "")
         end
         prompt_desc(ask, function(desc)
-            finish(note_full, title, desc)
+            cb(note_full, title, desc or "")
         end)
     end
 
@@ -725,7 +717,7 @@ local function open_or_create_note(opts, cwd, ask, done)
         end
         local default = default_from_prefix(opts.prefix_hint)
         prompt_note_full(ask, default, function(note_full)
-            if not note_full then return done(false) end
+            if not note_full then return cb(nil, nil, nil) end
             with_title(note_full)
         end)
     end
@@ -733,9 +725,85 @@ local function open_or_create_note(opts, cwd, ask, done)
     with_note_full()
 end
 
+-- Creates a note file (writes frontmatter if missing). Does NOT open.
+-- opts:
+--   refuse_overwrite: boolean (default true)
+-- Returns: created:boolean, path:string
+local function create_note_file(cwd, note_full, title, desc, opts)
+    opts = opts or {}
+    local refuse_overwrite = (opts.refuse_overwrite ~= false) -- default true
+
+    local path = note_path(cwd, note_full)
+
+    if refuse_overwrite and exists(path) then
+        -- Explicitly refuse to overwrite regardless of write_file_if_missing implementation.
+        return false, path
+    end
+
+    local created = ensure_note_file(path, note_full, title, desc or "")
+    return created, path
+end
+
+-- Opens note if present. Does NOT create.
+-- Returns: opened:boolean, path:string
+local function open_existing_note(cwd, note_full)
+    local path = note_path(cwd, note_full)
+    if exists(path) then
+        open_path(path)
+        return true, path
+    end
+    return false, path
+end
+
+local function open_or_create_note(opts, cwd, ask, done)
+    opts = opts or {}
+
+    -- If caller provided note_full, try open first without prompting.
+    if opts.note_full and opts.note_full ~= "" then
+        local opened, path = open_existing_note(cwd, opts.note_full)
+        if opened then
+            return done({
+                created = false,
+                opened = true,
+                path = path,
+                note_full = opts.note_full,
+            })
+        end
+        -- else: fall through to prompt remaining fields and create
+    end
+
+    prompt_note_meta(opts, ask, function(note_full, title, desc)
+        if not note_full then
+            return done({
+                created = false,
+                opened = false,
+                path = nil,
+                note_full = nil,
+            })
+        end
+
+        local created, path = create_note_file(cwd, note_full, title, desc, { refuse_overwrite = true })
+
+        -- If we refused overwrite or file already exists now, open it (same UX).
+        local opened, _ = open_existing_note(cwd, note_full)
+
+        return done({
+            created = created,
+            opened = opened,
+            path = opened and path or nil,
+            note_full = note_full,
+            title = title,
+            desc = desc,
+        })
+    end)
+end
+
 -- Public create (flexible UI adapter)
 local function create_note_flexible(cwd, prefix_hint, ask, done)
-    open_or_create_note({ prefix_hint = prefix_hint, ask_desc = true }, cwd, ask, done)
+    open_or_create_note({ prefix_hint = prefix_hint, ask_desc = true }, cwd, ask, function(res)
+        -- preserve previous contract: done(created:boolean)
+        done(res and res.created or false)
+    end)
 end
 
 --==============================================================
@@ -773,17 +841,16 @@ local function open_or_create_daily(cwd, ask, done)
         return done(false)
     end
 
-    local path = note_path(cwd, note_full)
-    if exists(path) then
-        open_path(path)
-        return done(false)
-    end
-
+    -- Daily behavior:
+    -- - if exists: open it, no prompts
+    -- - else: create it (note_full fixed, title fixed to stamp), still prompt desc (as before)
     open_or_create_note({
         note_full = note_full,
         title = stamp,
         ask_desc = true,
-    }, cwd, ask, done)
+    }, cwd, ask, function(res)
+        done(res and res.created or false)
+    end)
 end
 
 local function note_parent_prefix_from_buf(cwd)
@@ -1081,6 +1148,12 @@ local function safe_previewer(t)
     return nil
 end
 
+-- config: M._config.initial_mode = "normal" | "insert"
+local function hematite_initial_mode()
+    local m = M._config.telescope_initial_mode
+    return (m == "normal" or m == "insert") and m or "insert"
+end
+
 -- Vault picker: :Hematite vault
 local function pick_vault()
     local t = telescope_deps()
@@ -1095,7 +1168,7 @@ local function pick_vault()
         return
     end
 
-    t.pickers.new({}, {
+    t.pickers.new({ initial_mode = hematite_initial_mode() }, {
         prompt_title = "Hematite: vault",
         finder = t.finders.new_table({
             results = vaults,
@@ -1286,7 +1359,7 @@ local function navigator(cfg)
     open_picker = function()
         local node = current_node()
 
-        t.pickers.new({}, {
+        t.pickers.new({ initial_mode = hematite_initial_mode() }, {
             prompt_title = title_for(),
             results_title = results_title(),
             finder = make_finder(node),
