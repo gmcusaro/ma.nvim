@@ -16,7 +16,7 @@ local Job = safe_require("plenary.job")
 -- Config
 --==============================================================
 M._config = {
-    vaults = { -- If nil or {}, Hematite uses the current working directory as the root. Hematite uses the "active" vault (default: first).
+    vaults = { -- If nil or {}, it uses the current working directory as the root. By default the "active" vault is the first.
         {
             name = "Brain",
             path = "~/Brain/notes"
@@ -26,6 +26,7 @@ M._config = {
             path = "~/Desktop/Test/"
         }
     },
+    autochdir = "tcd", -- Values: false | "lcd" | "tcd" | "cd"
     depth = nil,
     delete_to_trash = true,
     telescope_initial_mode = "normal",  -- or "insert"
@@ -142,6 +143,20 @@ local function active_root()
     local v = M._config._active_vault
     if v and v.path and v.path ~= "" then return v.path end
     return normpath(vim.fn.getcwd())
+end
+
+local function maybe_chdir_to_active_root()
+  local mode = M._config.chdir
+  if not mode or mode == false then return end
+
+  local root = active_root()
+  if not root or root == "" then return end
+
+  local esc = vim.fn.fnameescape(root)
+  if mode == "lcd" then vim.cmd("lcd " .. esc)
+  elseif mode == "tcd" then vim.cmd("tcd " .. esc)
+  elseif mode == "cd" then vim.cmd("cd " .. esc)
+  end
 end
 
 --==============================================================
@@ -638,11 +653,6 @@ end
 --==============================================================
 -- Create helpers (prompting + file ensure + open)
 --==============================================================
-local function open_path(path)
-    if not path or path == "" then return end
-    vim.cmd("edit " .. vim.fn.fnameescape(path))
-end
-
 local function note_path(cwd, note_full)
     return cwd .. "/" .. note_full .. ".md"
 end
@@ -658,11 +668,13 @@ local function prompt_note_full(ask, default, cb)
         local raw = input or ""
         local trimmed = trim(raw)
 
-        -- user typed only whitespace -> treat as invalid input, keep UI consistent
         if raw ~= "" and trimmed == "" then
             vim.notify("Note name cannot consist only of whitespace", vim.log.levels.WARN)
             return cb(nil)
         end
+
+        trimmed = trimmed:gsub("%.[mM][dD]$", "")
+        trimmed = trimmed:gsub("%.[mM][aA][rR][kK][dD][oO][wW][nN]$", "")
 
         local note_full = normalize_note_full(trimmed)
         if note_full == "" then return cb(nil) end
@@ -677,6 +689,7 @@ local function prompt_title(ask, note_full, cb)
         cb((title ~= "" and title) or suggested)
     end)
 end
+
 local function prompt_desc(ask, cb)
     ask("Desc (optional): ", "", function(desc)
         cb(desc or "")
@@ -744,12 +757,10 @@ local function create_note_file(cwd, note_full, title, desc, opts)
     return created, path
 end
 
--- Opens note if present. Does NOT create.
--- Returns: opened:boolean, path:string
 local function open_existing_note(cwd, note_full)
     local path = note_path(cwd, note_full)
     if exists(path) then
-        open_path(path)
+        vim.cmd("edit " .. vim.fn.fnameescape(path))
         return true, path
     end
     return false, path
@@ -800,6 +811,7 @@ end
 
 -- Public create (flexible UI adapter)
 local function create_note_flexible(cwd, prefix_hint, ask, done)
+    maybe_chdir_to_active_root()
     open_or_create_note({ prefix_hint = prefix_hint, ask_desc = true }, cwd, ask, function(res)
         -- preserve previous contract: done(created:boolean)
         done(res and res.created or false)
@@ -835,6 +847,7 @@ local function daily_note_full_and_stamp()
 end
 
 local function open_or_create_daily(cwd, ask, done)
+    maybe_chdir_to_active_root()
     local note_full, stamp = daily_note_full_and_stamp()
     if not note_full then
         vim.notify("[hematite] daily notes are disabled (daily_notes=false)", vim.log.levels.WARN)
@@ -864,6 +877,108 @@ local function note_parent_prefix_from_buf(cwd)
     if #parts <= 1 then return "" end
     table.remove(parts, #parts)
     return table.concat(parts, ".")
+end
+
+--==============================================================
+-- Link from visual selection: :Hematite link
+--==============================================================
+local function get_visual_selection_range_and_text()
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    local sp = vim.fn.getpos("'<")
+    local ep = vim.fn.getpos("'>")
+    if not sp or not ep then return nil end
+
+    local srow, scol = sp[2], sp[3] -- 1-based, inclusive
+    local erow, ecol = ep[2], ep[3] -- 1-based, inclusive
+    if not (srow and scol and erow and ecol) then return nil end
+
+    -- normalize order
+    if erow < srow or (erow == srow and ecol < scol) then
+        srow, erow = erow, srow
+        scol, ecol = ecol, scol
+    end
+
+    local srow0, scol0 = srow - 1, math.max(0, scol - 1)
+    local erow0 = erow - 1
+
+    -- nvim_buf_get_text end_col is 0-based EXCLUSIVE.
+    -- getpos gives ecol as 1-based INCLUSIVE -> end_excl = ecol
+    local ecol_excl = math.max(0, ecol)
+
+    -- clamp end col to last line length (handles linewise selections / huge ecol)
+    local last = vim.api.nvim_buf_get_lines(bufnr, erow0, erow0 + 1, false)[1] or ""
+    local max_excl = #last
+    if ecol_excl > max_excl then ecol_excl = max_excl end
+
+    local chunks = vim.api.nvim_buf_get_text(bufnr, srow0, scol0, erow0, ecol_excl, {})
+    local text = table.concat(chunks, "\n")
+    if text == "" then return nil end
+
+    return {
+        bufnr = bufnr,
+        srow0 = srow0,
+        scol0 = scol0,
+        erow0 = erow0,
+        ecol0_excl = ecol_excl,
+        text = text,
+    }
+end
+
+local function hematite_link_from_visual()
+    maybe_chdir_to_active_root()
+    local cwd = active_root()
+
+    -- Must be a managed note (so "same root/folder/path" makes sense)
+    local cur = vim.api.nvim_buf_get_name(0)
+    if cur == "" or not is_under(cur, cwd) or not is_note_file(cur) then
+        vim.notify("[hematite] link: current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
+        return
+    end
+
+    local sel = get_visual_selection_range_and_text()
+    if not sel or not sel.text then
+        vim.notify("[hematite] link: no visual selection", vim.log.levels.WARN)
+        return
+    end
+
+    local label = sel.text
+    local suffix = normalize_note_full(trim(label)):lower()
+    if suffix == "" then
+        vim.notify("[hematite] link: selection cannot produce a valid note name", vim.log.levels.WARN)
+        return
+    end
+
+    local prefix = note_parent_prefix_from_buf(cwd) -- may be "" for root notes, that's fine
+    local default_full = (prefix ~= "" and (prefix .. "." .. suffix)) or suffix
+
+    -- Save range now; only mutate after successful creation
+    local src_buf = sel.bufnr
+    local srow0, scol0 = sel.srow0, sel.scol0
+    local erow0, ecol0_excl = sel.erow0, sel.ecol0_excl
+
+    -- Reuse your existing prompt + normalization rules
+    prompt_note_full(ask_cmdline, default_full, function(note_full)
+        if not note_full then return end
+        note_full = normalize_note_full(trim(note_full)):lower()
+        if note_full == "" then return end
+
+        open_or_create_note({
+            note_full = note_full,
+            ask_desc = true,
+        }, cwd, ask_cmdline, function(res)
+            -- Only after the note has been created do we convert selection into a link
+            if not res or not res.created then return end
+
+            local target = note_full .. ".md"
+            local repl = ("[%s](%s)"):format(label, target)
+
+            vim.schedule(function()
+                if not vim.api.nvim_buf_is_valid(src_buf) then return end
+                vim.api.nvim_buf_set_text(src_buf, srow0, scol0, erow0, ecol0_excl, { repl })
+            end)
+        end)
+    end)
 end
 
 --==============================================================
@@ -1482,6 +1597,7 @@ function M._runtime_cfg()
 end
 
 function M.navigate()
+    maybe_chdir_to_active_root()
     navigator(M._runtime_cfg())
 end
 
@@ -1505,6 +1621,10 @@ local function create_commands()
             return open_or_create_daily(cwd, ask_cmdline, function() end)
         end
 
+        if sub == "link" then
+            return hematite_link_from_visual()
+        end
+
         if sub == "create" then
             local cwd = active_root()
             local prefix = note_parent_prefix_from_buf(cwd)
@@ -1523,9 +1643,13 @@ local function create_commands()
     end, {
     nargs = "*",
     complete = function()
-        return { "create", "rename", "delete", "vault", "daily" }
+        return { "create", "link", "rename", "delete", "vault", "daily" }
     end,
 })
+end
+
+function M.link()
+  hematite_link_from_visual()
 end
 
 --==============================================================
