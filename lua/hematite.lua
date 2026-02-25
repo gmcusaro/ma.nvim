@@ -26,7 +26,7 @@ M._config = {
             path = "~/Desktop/Test/"
         }
     },
-    autochdir = "tcd", -- Values: false | "lcd" | "tcd" | "cd"
+    autochdir = "lcd", -- Values: false | "lcd" | "tcd" | "cd"
     depth = nil,
     delete_to_trash = true,
     telescope_initial_mode = "normal",  -- or "insert"
@@ -146,7 +146,7 @@ local function active_root()
 end
 
 local function maybe_chdir_to_active_root()
-  local mode = M._config.chdir
+  local mode = M._config.autochdir
   if not mode or mode == false then return end
 
   local root = active_root()
