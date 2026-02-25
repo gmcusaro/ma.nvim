@@ -477,7 +477,7 @@ end
 
 local function scan_notes_tree(cfg)
     if not (scandir and Path) then
-        vim.notify("[hematite] plenary.nvim is required", vim.log.levels.ERROR)
+        vim.notify("[Ma] plenary.nvim is required", vim.log.levels.ERROR)
         return nil, nil, nil
     end
 
@@ -842,7 +842,7 @@ local function open_or_create_daily(cwd, ask, done)
     maybe_chdir_to_active_root()
     local note_full, stamp = daily_note_full_and_stamp()
     if not note_full then
-        vim.notify("[hematite] daily notes are disabled (daily_notes=false)", vim.log.levels.WARN)
+        vim.notify("[Ma] daily notes are disabled (daily_notes=false)", vim.log.levels.WARN)
         return done(false)
     end
 
@@ -881,7 +881,7 @@ local function current_note_path_if_managed()
 end
 
 --==============================================================
--- Link from visual selection: :Hematite link
+-- Link from visual selection: :Ma link
 --==============================================================
 local function get_visual_selection_range_and_text()
     local bufnr = vim.api.nvim_get_current_buf()
@@ -922,27 +922,27 @@ local function get_visual_selection_range_and_text()
     }
 end
 
-local function hematite_link_from_visual()
+local function ma_link_from_visual()
     maybe_chdir_to_active_root()
     local cwd = active_root()
 
     -- Must be a managed note (so "same root/folder/path" makes sense)
     local cur = vim.api.nvim_buf_get_name(0)
     if cur == "" or not is_under(cur, cwd) or not is_note_file(cur) then
-        vim.notify("[hematite] link: current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
+        vim.notify("[Ma] link: current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
         return
     end
 
     local sel = get_visual_selection_range_and_text()
     if not sel or not sel.text then
-        vim.notify("[hematite] link: no visual selection", vim.log.levels.WARN)
+        vim.notify("[Ma] link: no visual selection", vim.log.levels.WARN)
         return
     end
 
     local label = sel.text
     local suffix = normalize_note_full(trim(label)):lower()
     if suffix == "" then
-        vim.notify("[hematite] link: selection cannot produce a valid note name", vim.log.levels.WARN)
+        vim.notify("[Ma] link: selection cannot produce a valid note name", vim.log.levels.WARN)
         return
     end
 
@@ -1028,7 +1028,7 @@ function actions.rename(cwd, selection, on_done)
 
             local items = gather_note_files_with_full(selection.node)
             if #items == 0 then
-                vim.notify("[hematite] folder has no note files to rename", vim.log.levels.WARN)
+                vim.notify("[Ma] folder has no note files to rename", vim.log.levels.WARN)
                 return on_done(false)
             end
 
@@ -1041,13 +1041,13 @@ function actions.rename(cwd, selection, on_done)
 
             local ok, err = ensure_unique_targets(pairs)
             if not ok then
-                vim.notify("[hematite] rename aborted: " .. err, vim.log.levels.ERROR)
+                vim.notify("[Ma] rename aborted: " .. err, vim.log.levels.ERROR)
                 return on_done(false)
             end
 
             do_batch_rename(pairs)
             vim.notify(
-                ("[hematite] renamed folder '%s' -> '%s' (%d files)"):format(old_prefix, new_prefix, #pairs),
+                ("[Ma] renamed folder '%s' -> '%s' (%d files)"):format(old_prefix, new_prefix, #pairs),
                 vim.log.levels.INFO
             )
             on_done(true)
@@ -1056,7 +1056,7 @@ function actions.rename(cwd, selection, on_done)
     end
 
     if not selection.path then
-        vim.notify("[hematite] no file exists for this node", vim.log.levels.WARN)
+        vim.notify("[Ma] no file exists for this node", vim.log.levels.WARN)
         return on_done(false)
     end
 
@@ -1071,12 +1071,12 @@ function actions.rename(cwd, selection, on_done)
         local pairs = { { from = selection.path, to = cwd .. "/" .. new_full .. ".md" } }
         local ok, err = ensure_unique_targets(pairs)
         if not ok then
-            vim.notify("[hematite] rename aborted: " .. err, vim.log.levels.ERROR)
+            vim.notify("[Ma] rename aborted: " .. err, vim.log.levels.ERROR)
             return on_done(false)
         end
 
         do_batch_rename(pairs)
-        vim.notify(("[hematite] renamed '%s' -> '%s'"):format(old_full, new_full), vim.log.levels.INFO)
+        vim.notify(("[Ma] renamed '%s' -> '%s'"):format(old_full, new_full), vim.log.levels.INFO)
         on_done(true)
     end)
 end
@@ -1087,7 +1087,7 @@ function actions.delete(selection, on_done)
     if selection.kind == "folder" then
         local paths = gather_files_under(selection.node)
         if #paths == 0 then
-            vim.notify("[hematite] folder has no note files", vim.log.levels.WARN)
+            vim.notify("[Ma] folder has no note files", vim.log.levels.WARN)
             return on_done(false)
         end
 
@@ -1096,12 +1096,12 @@ function actions.delete(selection, on_done)
 
         wipe_buffers_for_paths(paths)
         for _, p in ipairs(paths) do delete_one(p) end
-        vim.notify(("[hematite] %s %d file(s)"):format(delete_verb(), #paths), vim.log.levels.INFO)
+        vim.notify(("[Ma] %s %d file(s)"):format(delete_verb(), #paths), vim.log.levels.INFO)
         return on_done(true)
     end
 
     if not selection.path then
-        vim.notify("[hematite] no file exists for this node", vim.log.levels.WARN)
+        vim.notify("[Ma] no file exists for this node", vim.log.levels.WARN)
         return on_done(false)
     end
 
@@ -1110,14 +1110,14 @@ function actions.delete(selection, on_done)
 
     wipe_buffers_for_paths({ selection.path })
     delete_one(selection.path)
-    vim.notify(("[hematite] %s 1 file"):format(delete_verb()), vim.log.levels.INFO)
+    vim.notify(("[Ma] %s 1 file"):format(delete_verb()), vim.log.levels.INFO)
     on_done(true)
 end
 
 function actions.rename_current_buffer()
     local path = current_note_path_if_managed()
     if not path then
-        vim.notify("[hematite] current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
+        vim.notify("[Ma] current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
         return
     end
 
@@ -1136,12 +1136,12 @@ function actions.rename_current_buffer()
 
         local ok, err = ensure_unique_targets(pairs)
         if not ok then
-            vim.notify("[hematite] rename aborted: " .. err, vim.log.levels.ERROR)
+            vim.notify("[Ma] rename aborted: " .. err, vim.log.levels.ERROR)
             return
         end
 
         do_batch_rename(pairs)
-        vim.notify(("[hematite] renamed '%s' -> '%s'"):format(base, new_full), vim.log.levels.INFO)
+        vim.notify(("[Ma] renamed '%s' -> '%s'"):format(base, new_full), vim.log.levels.INFO)
         vim.cmd("edit " .. vim.fn.fnameescape(to))
     end)
 end
@@ -1149,7 +1149,7 @@ end
 function actions.delete_current_buffer()
     local path = current_note_path_if_managed()
     if not path then
-        vim.notify("[hematite] current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
+        vim.notify("[Ma] current buffer is not a managed note under vault/cwd", vim.log.levels.WARN)
         return
     end
 
@@ -1159,7 +1159,7 @@ function actions.delete_current_buffer()
 
     wipe_buffers_for_paths({ path })
     delete_one(path)
-    vim.notify(("[hematite] %s 1 file"):format(delete_verb()), vim.log.levels.INFO)
+    vim.notify(("[Ma] %s 1 file"):format(delete_verb()), vim.log.levels.INFO)
 end
 
 --==============================================================
@@ -1214,8 +1214,8 @@ local function safe_previewer(t)
                     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 
                     local ft = vim.filetype.match({ filename = path }) or "markdown"
-                    if self.state._hematite_last_ft ~= ft then
-                        self.state._hematite_last_ft = ft
+                    if self.state._ma_last_ft ~= ft then
+                        self.state._ma_last_ft = ft
                         vim.api.nvim_buf_call(bufnr, function()
                             pcall(vim.api.nvim_buf_set_option, bufnr, "filetype", ft)
                             if utils and utils.highlighter then
@@ -1226,8 +1226,8 @@ local function safe_previewer(t)
                         end)
                     end
 
-                    if self.state._hematite_last_path ~= path then
-                        self.state._hematite_last_path = path
+                    if self.state._ma_last_path ~= path then
+                        self.state._ma_last_path = path
                         if winid and vim.api.nvim_win_is_valid(winid) then
                             vim.schedule(function()
                                 if vim.api.nvim_win_is_valid(winid) then
@@ -1251,7 +1251,7 @@ local function safe_previewer(t)
     return nil
 end
 
-local function hematite_initial_mode()
+local function ma_initial_mode()
     local m = M._config.telescope_initial_mode
     return (m == "normal" or m == "insert") and m or "insert"
 end
@@ -1259,18 +1259,18 @@ end
 local function pick_vault()
     local t = telescope_deps()
     if not t then
-        vim.notify("[hematite] telescope.nvim is required", vim.log.levels.ERROR)
+        vim.notify("[Ma.nvim] telescope.nvim is required", vim.log.levels.ERROR)
         return
     end
 
     local vaults = normalize_vaults(M._config.vaults)
     if not vaults then
-        vim.notify("[hematite] no vaults configured", vim.log.levels.WARN)
+        vim.notify("[Ma.nvim] no vaults configured", vim.log.levels.WARN)
         return
     end
 
-    t.pickers.new({ initial_mode = hematite_initial_mode() }, {
-        prompt_title = "Hematite: vault",
+    t.pickers.new({ initial_mode = ma_initial_mode() }, {
+        prompt_title = "Ma: vault",
         finder = t.finders.new_table({
             results = vaults,
             entry_maker = function(v)
@@ -1301,7 +1301,7 @@ end
 local function navigator(cfg)
     local t = telescope_deps()
     if not t then
-        vim.notify("[hematite] telescope.nvim is required", vim.log.levels.ERROR)
+        vim.notify("[Ma.nvim] telescope.nvim is required", vim.log.levels.ERROR)
         return
     end
 
@@ -1332,7 +1332,7 @@ local function navigator(cfg)
         local has_vaults = type(M._config.vaults) == "table" and #M._config.vaults > 0
         local vault_name = (has_vaults and v and v.name and v.name ~= "") and v.name or nil
 
-        local base = vault_name and ("Hematite: " .. vault_name) or "Hematite"
+        local base = vault_name and ("Ma: " .. vault_name) or "Ma"
         return (prefix == "") and base or (base .. " · " .. prefix)
     end
 
@@ -1460,7 +1460,7 @@ local function navigator(cfg)
     open_picker = function()
         local node = current_node()
 
-        t.pickers.new({ initial_mode = hematite_initial_mode() }, {
+        t.pickers.new({ initial_mode = ma_initial_mode() }, {
             prompt_title = title_for(),
             results_title = results_title(),
             finder = make_finder(node),
@@ -1588,14 +1588,14 @@ function M.navigate()
 end
 
 function M.link()
-  hematite_link_from_visual()
+  ma_link_from_visual()
 end
 
 --==============================================================
 -- Commands
 --==============================================================
 local function create_commands()
-    vim.api.nvim_create_user_command("Hematite", function(opts)
+    vim.api.nvim_create_user_command("Ma", function(opts)
         local sub = (opts.fargs and opts.fargs[1]) and trim(opts.fargs[1]) or ""
 
         if sub == "" then
@@ -1612,7 +1612,7 @@ local function create_commands()
         end
 
         if sub == "link" then
-            return hematite_link_from_visual()
+            return ma_link_from_visual()
         end
 
         if sub == "create" then
@@ -1629,7 +1629,7 @@ local function create_commands()
             return actions.delete_current_buffer()
         end
 
-        vim.notify("[hematite] unknown subcommand: " .. sub, vim.log.levels.ERROR)
+        vim.notify("[Ma] unknown subcommand: " .. sub, vim.log.levels.ERROR)
     end, {
     nargs = "*",
     complete = function()
@@ -1676,7 +1676,7 @@ M.setup = function(user_opts)
 
     create_commands()
 
-    local group = vim.api.nvim_create_augroup("HematiteFrontmatterUpdated", { clear = true })
+    local group = vim.api.nvim_create_augroup("MaFrontmatterUpdated", { clear = true })
     vim.api.nvim_create_autocmd("BufWritePre", {
         group = group,
         pattern = { "*.md", "*.markdown" },
