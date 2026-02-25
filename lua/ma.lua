@@ -40,10 +40,10 @@ M._config = {
     columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
     sort =
     -- { by = "update", order = "desc" },
-    -- { by = "update", order = "asc" },
+    { by = "update", order = "asc" },
     -- { by = "creation", order = "asc" },
     -- { by = "creation", order = "desc" },
-    { by = "name", order = "asc" },
+    -- { by = "name", order = "asc" },
     -- { by = "name", order = "desc" },
     daily_notes = {
         date_format = nil, -- optional, default "%Y.%b-%d"
@@ -124,10 +124,13 @@ local function rename_file(from, to)
 end
 
 local function is_under(path, root)
-    if not path or path == "" or not root or root == "" then return false end
-    path = normpath(path) or path:gsub("\\", "/")
-    root = (normpath(root) or root:gsub("\\", "/")):gsub("/+$", "")
-    return path:sub(1, #root) == root
+  if not path or path == "" or not root or root == "" then return false end
+  path = (normpath(path) or path:gsub("\\", "/"))
+  root = ((normpath(root) or root:gsub("\\", "/")):gsub("/+$", ""))
+
+  if path:sub(1, #root) ~= root then return false end
+  local nextch = path:sub(#root + 1, #root + 1)
+  return nextch == "" or nextch == "/"
 end
 
 --==============================================================
@@ -573,6 +576,10 @@ local function scan_notes_tree(cfg)
         respect_gitignore = respect_gitignore,
     })
 
+    local sort = cfg.sort or M._config.sort or {}
+    local by = sort.by or "name"
+    local need_times = (by == "update" or by == "creation")
+
     local files = {}
     for _, abs in ipairs(paths) do
         if is_note_file(abs) then
@@ -588,11 +595,16 @@ local function scan_notes_tree(cfg)
             end
 
             rel = (rel or ""):gsub("\\", "/")
-            local base = (rel:match("([^/]+)$") or rel):gsub("%.[^.]+$", "")
-            local creation_ms, update_ms = file_times_ms(abs)
+            local note_full = rel:gsub("%.[^.]+$", ""):gsub("/", ".")
+            local creation_ms, update_ms = 0, 0
+
+            if need_times then
+                creation_ms, update_ms = file_times_ms(abs)
+            end
+
             files[#files + 1] = {
                 path = abs,
-                note = base,
+                note = note_full,
                 creation_ms = creation_ms,
                 update_ms = update_ms,
             }
@@ -1523,10 +1535,7 @@ local function navigator(cfg)
             }
         end
 
-        -- sort: allow either {by=...,order=...} OR {{by=...,order=...}, ...}
         local s = cfg.sort or M._config.sort or {}
-        if s[1] then s = s[1] end -- if list, take first spec (simple + predictable)
-
         local by = s.by or "name"
         local desc = (s.order == "desc")
 
