@@ -40,10 +40,10 @@ M._config = {
     columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
     sort =
     -- { by = "update", order = "desc" },
-    { by = "update", order = "asc" },
+    -- { by = "update", order = "asc" },
     -- { by = "creation", order = "asc" },
     -- { by = "creation", order = "desc" },
-    -- { by = "name", order = "asc" },
+    { by = "name", order = "asc" },
     -- { by = "name", order = "desc" },
     daily_notes = {
         date_format = nil, -- optional, default "%Y.%b-%d"
@@ -1175,36 +1175,60 @@ function actions.rename(cwd, selection, on_done)
 end
 
 function actions.delete(selection, on_done)
-    if not selection or selection.kind == "back" then return on_done(false) end
+    -- normalize to list
+    local sels = (type(selection) == "table" and rawget(selection, 1) ~= nil) and selection or { selection }
 
-    if selection.kind == "folder" then
-        local paths = gather_files_under(selection.node)
-        if #paths == 0 then
-            vim.notify("[Ma] folder has no note files", vim.log.levels.WARN)
-            return on_done(false)
+    local paths = {}
+    local item_count = 0
+    local first_sel = nil
+
+    for _, sel in ipairs(sels) do
+        if sel and sel.kind ~= "back" then
+            item_count = item_count + 1
+            if not first_sel then first_sel = sel end
+
+            if sel.kind == "folder" then
+                local sub = gather_files_under(sel.node)
+                for _, p in ipairs(sub) do paths[#paths + 1] = p end
+            elseif sel.path then
+                paths[#paths + 1] = sel.path
+            end
         end
-
-        local ans = prompt_ync(("Delete folder '%s' and %d note(s)?"):format(selection.full or selection.name, #paths))
-        if ans ~= "y" then return on_done(false) end
-
-        wipe_buffers_for_paths(paths)
-        for _, p in ipairs(paths) do delete_one(p) end
-        vim.notify(("[Ma] %s %d file(s)"):format(delete_verb(), #paths), vim.log.levels.INFO)
-        return on_done(true)
     end
 
-    if not selection.path then
-        vim.notify("[Ma] no file exists for this node", vim.log.levels.WARN)
+    if item_count == 0 then
         return on_done(false)
     end
 
-    local ans = prompt_ync(("Delete note '%s'?"):format(selection.full or selection.name))
+    if #paths == 0 then
+        -- consistent with your current messaging for "no file exists"
+        if item_count == 1 then
+            vim.notify("[Ma] no file exists for this node", vim.log.levels.WARN)
+        else
+            vim.notify("[Ma] nothing to delete", vim.log.levels.WARN)
+        end
+        return on_done(false)
+    end
+
+    -- prompt (preserve your single-item wording)
+    local msg
+    if item_count == 1 then
+        if first_sel.kind == "folder" then
+            msg = ("Delete folder '%s' and %d note(s)?"):format(first_sel.full or first_sel.name, #paths)
+        else
+            msg = ("Delete note '%s'?"):format(first_sel.full or first_sel.name)
+        end
+    else
+        msg = ("Delete %d selected item(s) and %d note(s)?"):format(item_count, #paths)
+    end
+
+    local ans = prompt_ync(msg)
     if ans ~= "y" then return on_done(false) end
 
-    wipe_buffers_for_paths({ selection.path })
-    delete_one(selection.path)
-    vim.notify(("[Ma] %s 1 file"):format(delete_verb()), vim.log.levels.INFO)
-    on_done(true)
+    wipe_buffers_for_paths(paths)
+    for _, p in ipairs(paths) do delete_one(p) end
+    vim.notify(("[Ma] %s %d file(s)"):format(delete_verb(), #paths), vim.log.levels.INFO)
+    return on_done(true)
 end
 
 function actions.rename_current_buffer()
@@ -1663,20 +1687,61 @@ local function navigator(cfg)
                 end
 
                 local function run_rename()
-                    local v = selection()
-                    if not v or v.kind == "back" then return end
+                    local entries = picker:get_multi_selection() or {}
+                    local n = 0
+                    local only = nil
+
+                    if #entries > 0 then
+                        for _, e in ipairs(entries) do
+                            local v = e and e.value
+                            if v and v.kind ~= "back" then
+                                n = n + 1
+                                only = v
+                                if n > 1 then break end
+                            end
+                        end
+                    else
+                        local v = selection()
+                        if v and v.kind ~= "back" then
+                            n = 1
+                            only = v
+                        end
+                    end
+
+                    if n ~= 1 or not only then
+                        vim.notify("[Ma] rename requires a single item selection", vim.log.levels.WARN)
+                        return
+                    end
+
                     t.actions.close(bufnr)
                     vim.schedule(function()
-                        actions.rename(cwd, v, done)
+                        actions.rename(cwd, only, done)
                     end)
                 end
 
                 local function run_delete()
-                    local v = selection()
-                    if not v or v.kind == "back" then return end
+                    local entries = picker:get_multi_selection() or {}
+                    local values = {}
+
+                    if #entries > 0 then
+                        for _, e in ipairs(entries) do
+                            local v = e and e.value
+                            if v and v.kind ~= "back" then
+                                values[#values + 1] = v
+                            end
+                        end
+                    else
+                        local v = selection()
+                        if v and v.kind ~= "back" then
+                            values[1] = v
+                        end
+                    end
+
+                    if #values == 0 then return end
+
                     t.actions.close(bufnr)
                     vim.schedule(function()
-                        actions.delete(v, done)
+                        actions.delete(values, done)
                     end)
                 end
 
