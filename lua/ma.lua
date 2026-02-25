@@ -156,9 +156,7 @@ local function normalize_vaults(vault)
     if type(v) == "table" and type(v.path) == "string" and v.path ~= "" then
       local p = normpath(v.path)
 
-      -- skip invalid / non-existent / non-directory
       if p and p ~= "" and is_dir(p) then
-        -- keep first occurrence of each path
         if not seen[p] then
           seen[p] = true
           local name = (type(v.name) == "string" and v.name ~= "") and v.name or basename(p)
@@ -208,8 +206,6 @@ local function file_times_ms(path)
 
   local mtime = ms(st.mtime)
 
-  -- “creation” is best-effort:
-  -- birthtime if available, else ctime, else mtime (last fallback)
   local birth = ms(st.birthtime)
   local ctime = ms(st.ctime)
   local creation = birth ~= 0 and birth or (ctime ~= 0 and ctime or mtime)
@@ -286,7 +282,6 @@ local function frontmatter_text(note_full, title, desc)
     }, "\n")
 end
 
--- Always md/markdown now (removed exts option)
 local function is_note_file(path)
     local ext = path:match("%.([^.]+)$")
     if not ext then return false end
@@ -444,7 +439,6 @@ local function build_git_status_map(cwd)
             end
         end
     end
-
     return result
 end
 
@@ -529,7 +523,6 @@ local function build_tree(files, git_map)
         n.creation_ms = min_creation
         n.update_ms = max_update
     end
-
     dfs(root)
     return root
 end
@@ -566,7 +559,6 @@ local function normalize_columns(columns)
             seen[c] = true
         end
     end
-
     return spec
 end
 
@@ -628,7 +620,6 @@ local function scan_notes_tree(cfg)
             }
         end
     end
-
     return cwd, build_tree(files, git_map), git_map
 end
 
