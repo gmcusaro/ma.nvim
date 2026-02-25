@@ -26,19 +26,29 @@ M._config = {
             path = "~/Desktop/Test/"
         }
     },
+    respect_gitignore = true,
     autochdir = "lcd", -- Values: false | "lcd" | "tcd" | "cd"
     depth = nil,
     delete_to_trash = true,
-    telescope_initial_mode = "normal",  -- or "insert"
     picker_actions = {
         { "c", "create" },
         { "r", "rename" },
         { "d", "delete" },
     },
+    date_format_frontmatter = "%Y %b %d - %H:%M:%S",
+    telescope_initial_mode = "normal",  -- or "insert"
     columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
-    respect_gitignore = true,
+    sort = {
+        { by = "update", order = "desc" },
+        { by = "name", order = "asc" }
+    },
+    sort_presets = {
+        recent = { by = "update", order = "desc" },
+        oldest = { by = "creation", order = "asc" },
+        alpha  = { by = "name", order = "asc" },
+    },
     daily_notes = {
-        date_format = nil, -- optional, default `%Y.%b-%d`
+        date_format = nil, -- optional, default "%Y.%b-%d"
         locale = nil, -- optional, default current locale
     }
 }
@@ -163,6 +173,23 @@ local function maybe_chdir_to_active_root()
 end
 
 --==============================================================
+-- Date formatting (shared)
+--==============================================================
+local function format_stamp(fmt, locale)
+  fmt = (type(fmt) == "string" and fmt ~= "") and fmt or "%Y.%b-%d"
+
+  if not locale or locale == "" then
+    return os.date(fmt)
+  end
+
+  local old = os.setlocale(nil, "time")
+  os.setlocale(locale, "time")
+  local s = os.date(fmt)
+  os.setlocale(old, "time")
+  return s
+end
+
+--==============================================================
 -- Note/frontmatter utils (ids, titles, file detection)
 --==============================================================
 local function now_ms()
@@ -200,20 +227,22 @@ local function title_from_note_name(note_full)
 end
 
 local function frontmatter_text(note_full, title, desc)
-    local t = (title and title ~= "") and title or title_from_note_name(note_full)
-    local d = desc or ""
-    local ts = now_ms()
-    local id = nanoid_like(23)
-    return table.concat({
-        "---",
-        ("id: %s"):format(id),
-        ("title: %s"):format(t),
-        ("desc: %s"):format(d),
-        ("updated: %d"):format(ts),
-        ("created: %d"):format(ts),
-        "---",
-        "",
-    }, "\n")
+  local t = (title and title ~= "") and title or title_from_note_name(note_full)
+  local d = desc or ""
+  local id = nanoid_like(23)
+
+  local stamp = format_stamp(M._config.date_format_frontmatter, nil)
+
+  return table.concat({
+    "---",
+    ("id: %s"):format(id),
+    ("title: %s"):format(t),
+    ("desc: %s"):format(d),
+    ("updated: %s"):format(stamp),
+    ("created: %s"):format(stamp),
+    "---",
+    "",
+  }, "\n")
 end
 
 -- Always md/markdown now (removed exts option)
@@ -526,28 +555,29 @@ end
 -- Buffer / frontmatter maintenance
 --==============================================================
 local function update_frontmatter_updated(bufnr)
-    bufnr = bufnr or 0
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    if #lines < 3 or lines[1] ~= "---" then return end
+  bufnr = bufnr or 0
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  if #lines < 3 or lines[1] ~= "---" then return end
 
-    local fm_end
-    for i = 2, math.min(#lines, 200) do
-        if lines[i] == "---" then fm_end = i break end
+  local fm_end
+  for i = 2, math.min(#lines, 200) do
+    if lines[i] == "---" then fm_end = i break end
+  end
+  if not fm_end then return end
+
+  local updated_idx
+  for i = 2, fm_end - 1 do
+    if lines[i]:match("^updated:%s*.+%s*$") then
+      updated_idx = i
+      break
     end
-    if not fm_end then return end
+  end
+  if not updated_idx then return end
 
-    local updated_idx
-    for i = 2, fm_end - 1 do
-        if lines[i]:match("^updated:%s*%d+%s*$") then
-            updated_idx = i
-            break
-        end
-    end
-    if not updated_idx then return end
-
-    vim.api.nvim_buf_set_lines(bufnr, updated_idx - 1, updated_idx, false, {
-        ("updated: %d"):format(now_ms()),
-    })
+  local stamp = format_stamp(M._config.date_format_frontmatter, nil)
+  vim.api.nvim_buf_set_lines(bufnr, updated_idx - 1, updated_idx, false, {
+    ("updated: %s"):format(stamp),
+  })
 end
 
 local function retarget_open_buffers(old_to_new)
@@ -814,22 +844,13 @@ end
 -- Daily notes
 --==============================================================
 local function format_daily_stamp()
-    local d = M._config.daily_notes
-    if d == false then return nil end
-    if type(d) ~= "table" then d = {} end
+  local d = M._config.daily_notes
+  if d == false then return nil end
+  if type(d) ~= "table" then d = {} end
 
-    local fmt = (type(d.date_format) == "string" and d.date_format ~= "") and d.date_format or "%Y.%b-%d"
-    local loc = (type(d.locale) == "string" and d.locale ~= "") and d.locale or nil
-
-    if not loc then
-        return os.date(fmt)
-    end
-
-    local old = os.setlocale(nil, "time")
-    os.setlocale(loc, "time")
-    local s = os.date(fmt)
-    os.setlocale(old, "time")
-    return s
+  local fmt = d.date_format
+  local loc = d.locale
+  return format_stamp(fmt, loc) -- default handled inside format_stamp
 end
 
 local function daily_note_full_and_stamp()
