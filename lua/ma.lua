@@ -136,21 +136,39 @@ end
 --==============================================================
 -- Vault utils (root selection + chdir)
 --==============================================================
+local function basename(p)
+  p = (p or ""):gsub("\\", "/"):gsub("/+$", "")
+  return p:match("([^/]+)$") or p
+end
+
+local function is_dir(p)
+  local uv = vim.uv or vim.loop
+  local st = p and uv and uv.fs_stat(p) or nil
+  return st and st.type == "directory"
+end
+
 local function normalize_vaults(vault)
-    if type(vault) ~= "table" or vim.tbl_isempty(vault) then return nil end
-    local out = {}
-    for _, v in ipairs(vault) do
-        if type(v) == "table" and type(v.path) == "string" and v.path ~= "" then
-            local p = normpath(v.path)
-            if p and p ~= "" then
-                out[#out + 1] = {
-                    name = (type(v.name) == "string" and v.name ~= "") and v.name or p,
-                    path = p,
-                }
-            end
+  if type(vault) ~= "table" or vim.tbl_isempty(vault) then return nil end
+
+  local out, seen = {}, {}
+
+  for _, v in ipairs(vault) do
+    if type(v) == "table" and type(v.path) == "string" and v.path ~= "" then
+      local p = normpath(v.path)
+
+      -- skip invalid / non-existent / non-directory
+      if p and p ~= "" and is_dir(p) then
+        -- keep first occurrence of each path
+        if not seen[p] then
+          seen[p] = true
+          local name = (type(v.name) == "string" and v.name ~= "") and v.name or basename(p)
+          out[#out + 1] = { name = name, path = p }
         end
+      end
     end
-    return (#out > 0) and out or nil
+  end
+
+  return (#out > 0) and out or nil
 end
 
 local function active_root()
