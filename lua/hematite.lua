@@ -44,6 +44,13 @@ M._config = {
 }
 
 --==============================================================
+-- General small utils (used everywhere)
+--==============================================================
+local function trim(s)
+    return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+--==============================================================
 -- Path / FS utils (PlenaryPath wrapper)
 --==============================================================
 local function normpath(p)
@@ -116,12 +123,8 @@ local function is_under(path, root)
 end
 
 --==============================================================
--- Vault utils
+-- Vault utils (root selection + chdir)
 --==============================================================
-local function trim(s)
-    return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
-end
-
 local function normalize_vaults(vault)
     if type(vault) ~= "table" or vim.tbl_isempty(vault) then return nil end
     local out = {}
@@ -160,7 +163,7 @@ local function maybe_chdir_to_active_root()
 end
 
 --==============================================================
--- Note/frontmatter utils
+-- Note/frontmatter utils (ids, titles, file detection)
 --==============================================================
 local function now_ms()
     return math.floor(os.time() * 1000)
@@ -578,7 +581,7 @@ local function wipe_buffers_for_paths(paths)
 end
 
 --==============================================================
--- Prompts
+-- Prompts (cmdline/UI)
 --==============================================================
 local function prompt_ync(message)
     vim.cmd("redraw")
@@ -590,8 +593,18 @@ local function prompt_ync(message)
     return nil
 end
 
+local function ask_cmdline(prompt, default, cb)
+    vim.cmd("redraw")
+    local s = vim.fn.input(prompt, default or "")
+    cb(s)
+end
+
+local function ask_ui(prompt, default, cb)
+    vim.ui.input({ prompt = prompt, default = default or "" }, cb)
+end
+
 --==============================================================
--- Batch rename safety
+-- Batch rename safety + mechanics
 --==============================================================
 local function ensure_unique_targets(pairs)
     local seen = {}
@@ -622,18 +635,8 @@ local function do_batch_rename(pairs)
 end
 
 --==============================================================
--- Create (ONE implementation, TWO UI adapters) - FLEXIBLE
+-- Create helpers (normalization + prompt chain)
 --==============================================================
-local function ask_cmdline(prompt, default, cb)
-    vim.cmd("redraw")
-    local s = vim.fn.input(prompt, default or "")
-    cb(s)
-end
-
-local function ask_ui(prompt, default, cb)
-    vim.ui.input({ prompt = prompt, default = default or "" }, cb)
-end
-
 local function normalize_note_full(s)
     s = trim(s or "")
     if s == "" then return "" end
@@ -650,9 +653,6 @@ local function normalize_note_full(s)
     return s
 end
 
---==============================================================
--- Create helpers (prompting + file ensure + open)
---==============================================================
 local function note_path(cwd, note_full)
     return cwd .. "/" .. note_full .. ".md"
 end
@@ -855,6 +855,9 @@ local function open_or_create_daily(cwd, ask, done)
     end)
 end
 
+--==============================================================
+-- Current-buffer helpers (prefix + managed note detection)
+--==============================================================
 local function note_parent_prefix_from_buf(cwd)
     local path = vim.api.nvim_buf_get_name(0)
     if path == "" then return "" end
@@ -866,6 +869,15 @@ local function note_parent_prefix_from_buf(cwd)
     if #parts <= 1 then return "" end
     table.remove(parts, #parts)
     return table.concat(parts, ".")
+end
+
+local function current_note_path_if_managed()
+    local root = active_root()
+    local file = vim.api.nvim_buf_get_name(0)
+    if file == "" then return nil end
+    if not is_under(file, root) then return nil end
+    if not is_note_file(file) then return nil end
+    return normpath(file) or file
 end
 
 --==============================================================
@@ -1102,15 +1114,6 @@ function actions.delete(selection, on_done)
     on_done(true)
 end
 
-local function current_note_path_if_managed()
-    local root = active_root()
-    local file = vim.api.nvim_buf_get_name(0)
-    if file == "" then return nil end
-    if not is_under(file, root) then return nil end
-    if not is_note_file(file) then return nil end
-    return normpath(file) or file
-end
-
 function actions.rename_current_buffer()
     local path = current_note_path_if_managed()
     if not path then
@@ -1160,7 +1163,7 @@ function actions.delete_current_buffer()
 end
 
 --==============================================================
--- Telescope integration
+-- Telescope integration (deps + UI)
 --==============================================================
 local function telescope_deps()
     local pickers = safe_require("telescope.pickers")
@@ -1584,6 +1587,10 @@ function M.navigate()
     navigator(M._runtime_cfg())
 end
 
+function M.link()
+  hematite_link_from_visual()
+end
+
 --==============================================================
 -- Commands
 --==============================================================
@@ -1629,10 +1636,6 @@ local function create_commands()
         return { "create", "link", "rename", "delete", "vault", "daily" }
     end,
 })
-end
-
-function M.link()
-  hematite_link_from_visual()
 end
 
 --==============================================================
