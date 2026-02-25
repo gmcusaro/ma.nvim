@@ -38,15 +38,13 @@ M._config = {
     date_format_frontmatter = "%Y %b %d - %H:%M:%S",
     telescope_initial_mode = "normal",  -- or "insert"
     columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
-    sort = {
-        { by = "update", order = "desc" },
-        { by = "name", order = "asc" }
-    },
-    sort_presets = {
-        recent = { by = "update", order = "desc" },
-        oldest = { by = "creation", order = "asc" },
-        alpha  = { by = "name", order = "asc" },
-    },
+    sort =
+    -- { by = "update", order = "desc" },
+    -- { by = "update", order = "asc" },
+    -- { by = "creation", order = "asc" },
+    -- { by = "creation", order = "desc" },
+    { by = "name", order = "asc" },
+    -- { by = "name", order = "desc" },
     daily_notes = {
         date_format = nil, -- optional, default "%Y.%b-%d"
         locale = nil, -- optional, default current locale
@@ -159,43 +157,65 @@ local function active_root()
 end
 
 local function maybe_chdir_to_active_root()
-  local mode = M._config.autochdir
-  if not mode or mode == false then return end
+    local mode = M._config.autochdir
+    if not mode or mode == false then return end
 
-  local root = active_root()
-  if not root or root == "" then return end
+    local root = active_root()
+    if not root or root == "" then return end
 
-  local esc = vim.fn.fnameescape(root)
-  if mode == "lcd" then vim.cmd("lcd " .. esc)
-  elseif mode == "tcd" then vim.cmd("tcd " .. esc)
-  elseif mode == "cd" then vim.cmd("cd " .. esc)
+    local esc = vim.fn.fnameescape(root)
+    if mode == "lcd" then vim.cmd("lcd " .. esc)
+    elseif mode == "tcd" then vim.cmd("tcd " .. esc)
+    elseif mode == "cd" then vim.cmd("cd " .. esc)
+    end
+end
+
+--==============================================================
+-- FS metadata (uv/fs_stat) for sorting
+--==============================================================
+local function ms(t)
+  if type(t) == "table" and type(t.sec) == "number" then
+    return t.sec * 1000 + math.floor((t.nsec or 0) / 1e6)
   end
+  return 0
+end
+
+local function file_times_ms(path)
+  local uv = vim.uv or vim.loop
+  local st = (path and uv) and uv.fs_stat(path) or nil
+  if not st then return 0, 0 end
+
+  local mtime = ms(st.mtime)
+
+  -- “creation” is best-effort:
+  -- birthtime if available, else ctime, else mtime (last fallback)
+  local birth = ms(st.birthtime)
+  local ctime = ms(st.ctime)
+  local creation = birth ~= 0 and birth or (ctime ~= 0 and ctime or mtime)
+
+  return creation, mtime
 end
 
 --==============================================================
 -- Date formatting (shared)
 --==============================================================
 local function format_stamp(fmt, locale)
-  fmt = (type(fmt) == "string" and fmt ~= "") and fmt or "%Y.%b-%d"
+    fmt = (type(fmt) == "string" and fmt ~= "") and fmt or "%Y.%b-%d"
 
-  if not locale or locale == "" then
-    return os.date(fmt)
-  end
+    if not locale or locale == "" then
+        return os.date(fmt)
+    end
 
-  local old = os.setlocale(nil, "time")
-  os.setlocale(locale, "time")
-  local s = os.date(fmt)
-  os.setlocale(old, "time")
-  return s
+    local old = os.setlocale(nil, "time")
+    os.setlocale(locale, "time")
+    local s = os.date(fmt)
+    os.setlocale(old, "time")
+    return s
 end
 
 --==============================================================
 -- Note/frontmatter utils (ids, titles, file detection)
 --==============================================================
-local function now_ms()
-    return math.floor(os.time() * 1000)
-end
-
 -- Seed math.random once (do NOT reseed per id)
 do
     local _uv = vim.uv or vim.loop
@@ -227,22 +247,22 @@ local function title_from_note_name(note_full)
 end
 
 local function frontmatter_text(note_full, title, desc)
-  local t = (title and title ~= "") and title or title_from_note_name(note_full)
-  local d = desc or ""
-  local id = nanoid_like(23)
+    local t = (title and title ~= "") and title or title_from_note_name(note_full)
+    local d = desc or ""
+    local id = nanoid_like(23)
 
-  local stamp = format_stamp(M._config.date_format_frontmatter, nil)
+    local stamp = format_stamp(M._config.date_format_frontmatter, nil)
 
-  return table.concat({
-    "---",
-    ("id: %s"):format(id),
-    ("title: %s"):format(t),
-    ("desc: %s"):format(d),
-    ("updated: %s"):format(stamp),
-    ("created: %s"):format(stamp),
-    "---",
-    "",
-  }, "\n")
+    return table.concat({
+        "---",
+        ("id: %s"):format(id),
+        ("title: %s"):format(t),
+        ("desc: %s"):format(d),
+        ("updated: %s"):format(stamp),
+        ("created: %s"):format(stamp),
+        "---",
+        "",
+    }, "\n")
 end
 
 -- Always md/markdown now (removed exts option)
@@ -432,7 +452,15 @@ local function node_has_children(node)
 end
 
 local function build_tree(files, git_map)
-    local root = { seg = nil, full = "", children = {}, file = nil, git = "clean" }
+    local root = {
+        seg = nil,
+        full = "",
+        children = {},
+        file = nil,
+        git = "clean",
+        creation_ms = 0,
+        update_ms = 0,
+    }
 
     for _, item in ipairs(files) do
         local parts = split_dots(item.note)
@@ -447,21 +475,38 @@ local function build_tree(files, git_map)
                 children = {},
                 file = nil,
                 git = "clean",
+                creation_ms = 0,
+                update_ms = 0,
             }
             node = node.children[seg]
         end
 
         node.file = item.path
         node.git = (git_map and item.path and git_map[item.path]) or node.git
+        node.creation_ms = item.creation_ms or 0
+        node.update_ms = item.update_ms or 0
     end
 
     local function dfs(n)
-        local best = n.git or "clean"
+        local best_git = n.git or "clean"
+        local min_creation = (n.creation_ms or 0)
+        local max_update = (n.update_ms or 0)
+
         for _, c in pairs(n.children or {}) do
             dfs(c)
-            best = git_worst(best, c.git)
+            best_git = git_worst(best_git, c.git)
+
+            local cc = (c.creation_ms or 0)
+            if cc > 0 then
+                min_creation = (min_creation == 0) and cc or math.min(min_creation, cc)
+            end
+
+            max_update = math.max(max_update, (c.update_ms or 0))
         end
-        n.git = best
+
+        n.git = best_git
+        n.creation_ms = min_creation
+        n.update_ms = max_update
     end
 
     dfs(root)
@@ -544,7 +589,13 @@ local function scan_notes_tree(cfg)
 
             rel = (rel or ""):gsub("\\", "/")
             local base = (rel:match("([^/]+)$") or rel):gsub("%.[^.]+$", "")
-            files[#files + 1] = { path = abs, note = base }
+            local creation_ms, update_ms = file_times_ms(abs)
+            files[#files + 1] = {
+                path = abs,
+                note = base,
+                creation_ms = creation_ms,
+                update_ms = update_ms,
+            }
         end
     end
 
@@ -555,29 +606,29 @@ end
 -- Buffer / frontmatter maintenance
 --==============================================================
 local function update_frontmatter_updated(bufnr)
-  bufnr = bufnr or 0
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  if #lines < 3 or lines[1] ~= "---" then return end
+    bufnr = bufnr or 0
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    if #lines < 3 or lines[1] ~= "---" then return end
 
-  local fm_end
-  for i = 2, math.min(#lines, 200) do
-    if lines[i] == "---" then fm_end = i break end
-  end
-  if not fm_end then return end
-
-  local updated_idx
-  for i = 2, fm_end - 1 do
-    if lines[i]:match("^updated:%s*.+%s*$") then
-      updated_idx = i
-      break
+    local fm_end
+    for i = 2, math.min(#lines, 200) do
+        if lines[i] == "---" then fm_end = i break end
     end
-  end
-  if not updated_idx then return end
+    if not fm_end then return end
 
-  local stamp = format_stamp(M._config.date_format_frontmatter, nil)
-  vim.api.nvim_buf_set_lines(bufnr, updated_idx - 1, updated_idx, false, {
-    ("updated: %s"):format(stamp),
-  })
+    local updated_idx
+    for i = 2, fm_end - 1 do
+        if lines[i]:match("^updated:%s*.+%s*$") then
+            updated_idx = i
+            break
+        end
+    end
+    if not updated_idx then return end
+
+    local stamp = format_stamp(M._config.date_format_frontmatter, nil)
+    vim.api.nvim_buf_set_lines(bufnr, updated_idx - 1, updated_idx, false, {
+        ("updated: %s"):format(stamp),
+    })
 end
 
 local function retarget_open_buffers(old_to_new)
@@ -844,13 +895,13 @@ end
 -- Daily notes
 --==============================================================
 local function format_daily_stamp()
-  local d = M._config.daily_notes
-  if d == false then return nil end
-  if type(d) ~= "table" then d = {} end
+    local d = M._config.daily_notes
+    if d == false then return nil end
+    if type(d) ~= "table" then d = {} end
 
-  local fmt = d.date_format
-  local loc = d.locale
-  return format_stamp(fmt, loc) -- default handled inside format_stamp
+    local fmt = d.date_format
+    local loc = d.locale
+    return format_stamp(fmt, loc) -- default handled inside format_stamp
 end
 
 local function daily_note_full_and_stamp()
@@ -1319,6 +1370,19 @@ local function pick_vault()
     }):find()
 end
 
+--==============================================================
+-- Sorting (multi-key + fallback)
+--==============================================================
+local function is_list(t)
+    if type(t) ~= "table" then return false end
+    local n = #t
+    for i = 1, n do
+        if rawget(t, i) == nil then return false end
+    end
+    -- if it has non-array keys too, we still treat it as list for our purposes
+    return true
+end
+
 local function navigator(cfg)
     local t = telescope_deps()
     if not t then
@@ -1363,7 +1427,7 @@ local function navigator(cfg)
         if type(pa) ~= "table" then return {} end
 
         local out = {}
-        if vim.tbl_islist(pa) then
+        if is_list(pa) then
             -- ordered: { {"c","create"}, {"r","rename"} }
             for _, it in ipairs(pa) do
                 local k, act = it[1], it[2]
@@ -1444,9 +1508,11 @@ local function navigator(cfg)
 
     local function build_entries(node)
         local results = {}
+
         for _, seg in ipairs(sorted_child_segments(node)) do
             local child = node.children[seg]
             local is_folder = node_has_children(child)
+
             results[#results + 1] = {
                 kind = is_folder and "folder" or "file",
                 name = seg,
@@ -1456,6 +1522,36 @@ local function navigator(cfg)
                 git = child.git or "clean",
             }
         end
+
+        -- sort: allow either {by=...,order=...} OR {{by=...,order=...}, ...}
+        local s = cfg.sort or M._config.sort or {}
+        if s[1] then s = s[1] end -- if list, take first spec (simple + predictable)
+
+        local by = s.by or "name"
+        local desc = (s.order == "desc")
+
+        local function key(v)
+            if by == "update" then
+                return tonumber(v.node and v.node.update_ms) or 0
+            elseif by == "creation" then
+                return tonumber(v.node and v.node.creation_ms) or 0
+            else -- "name"
+                return tostring(v.name or ""):lower()
+            end
+        end
+
+        table.sort(results, function(a, b)
+            local ka, kb = key(a), key(b)
+            if ka ~= kb then
+                if desc then return ka > kb else return ka < kb end
+            end
+            -- strict deterministic fallback to avoid "invalid order function"
+            local fa = tostring(a.full or a.name or "")
+            local fb = tostring(b.full or b.name or "")
+            if fa ~= fb then return fa < fb end
+            return false
+        end)
+
         return results
     end
 
@@ -1609,7 +1705,7 @@ function M.navigate()
 end
 
 function M.link()
-  ma_link_from_visual()
+    ma_link_from_visual()
 end
 
 --==============================================================
