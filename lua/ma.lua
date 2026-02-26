@@ -36,7 +36,19 @@ M._config = {
         { "d", "delete" },
     },
     date_format_frontmatter = "%Y %b %d - %H:%M:%S",
-    telescope_initial_mode = "normal",  -- or "insert"
+    telescope = {
+        prompt_prefix = " ",
+        selection_caret = "| ",
+        initial_mode = "normal",  -- or "insert"
+        layout_config = {
+            prompt_position = "bottom",
+            -- width = 0.9,
+            -- height = 0.9,
+            -- preview_width = 0.6,
+            -- mirror = false,
+            -- preview_cutoff = 120,
+        },
+    },
     columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
     sort =
     -- { by = "update", order = "desc" },
@@ -1368,9 +1380,39 @@ local function safe_previewer(t)
     return nil
 end
 
-local function ma_initial_mode()
-    local m = M._config.telescope_initial_mode
-    return (m == "normal" or m == "insert") and m or "insert"
+local function is_nonempty_table(t)
+    return type(t) == "table" and next(t) ~= nil
+end
+
+local function compact(tbl)
+    if type(tbl) ~= "table" then return nil end
+    local out = {}
+    for k, v in pairs(tbl) do
+        if v ~= nil then out[k] = v end
+    end
+    return next(out) and out or nil
+end
+
+local function telescope_opts()
+    local t = M._config.telescope
+    if not is_nonempty_table(t) then return nil end
+
+    -- validate initial_mode if present
+    local initial_mode = nil
+    if t.initial_mode == "normal" or t.initial_mode == "insert" then
+        initial_mode = t.initial_mode
+    end
+
+    -- layout_config: pass only if user provided something
+    local layout_config = is_nonempty_table(t.layout_config) and compact(t.layout_config) or nil
+
+    -- build final opts: only include user-set keys (no defaults injected here)
+    return compact({
+        prompt_prefix = t.prompt_prefix,
+        selection_caret = t.selection_caret,
+        initial_mode = initial_mode,
+        layout_config = layout_config,
+    })
 end
 
 local function pick_vault()
@@ -1386,7 +1428,7 @@ local function pick_vault()
         return
     end
 
-    t.pickers.new({ initial_mode = ma_initial_mode() }, {
+    t.pickers.new(telescope_opts() or {}, {
         prompt_title = "Ma: vault",
         finder = t.finders.new_table({
             results = vaults,
@@ -1619,7 +1661,7 @@ local function navigator(cfg)
     open_picker = function()
         local node = current_node()
 
-        t.pickers.new({ initial_mode = ma_initial_mode() }, {
+        t.pickers.new(telescope_opts() or {}, {
             prompt_title = title_for(),
             results_title = results_title(),
             finder = make_finder(node),
