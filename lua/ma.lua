@@ -136,49 +136,49 @@ local function rename_file(from, to)
 end
 
 local function is_under(path, root)
-  if not path or path == "" or not root or root == "" then return false end
-  path = (normpath(path) or path:gsub("\\", "/"))
-  root = ((normpath(root) or root:gsub("\\", "/")):gsub("/+$", ""))
+    if not path or path == "" or not root or root == "" then return false end
+    path = (normpath(path) or path:gsub("\\", "/"))
+    root = ((normpath(root) or root:gsub("\\", "/")):gsub("/+$", ""))
 
-  if path:sub(1, #root) ~= root then return false end
-  local nextch = path:sub(#root + 1, #root + 1)
-  return nextch == "" or nextch == "/"
+    if path:sub(1, #root) ~= root then return false end
+    local nextch = path:sub(#root + 1, #root + 1)
+    return nextch == "" or nextch == "/"
 end
 
 --==============================================================
 -- Vault utils (root selection + chdir)
 --==============================================================
 local function basename(p)
-  p = (p or ""):gsub("\\", "/"):gsub("/+$", "")
-  return p:match("([^/]+)$") or p
+    p = (p or ""):gsub("\\", "/"):gsub("/+$", "")
+    return p:match("([^/]+)$") or p
 end
 
 local function is_dir(p)
-  local uv = vim.uv or vim.loop
-  local st = p and uv and uv.fs_stat(p) or nil
-  return st and st.type == "directory"
+    local uv = vim.uv or vim.loop
+    local st = p and uv and uv.fs_stat(p) or nil
+    return st and st.type == "directory"
 end
 
 local function normalize_vaults(vault)
-  if type(vault) ~= "table" or vim.tbl_isempty(vault) then return nil end
+    if type(vault) ~= "table" or vim.tbl_isempty(vault) then return nil end
 
-  local out, seen = {}, {}
+    local out, seen = {}, {}
 
-  for _, v in ipairs(vault) do
-    if type(v) == "table" and type(v.path) == "string" and v.path ~= "" then
-      local p = normpath(v.path)
+    for _, v in ipairs(vault) do
+        if type(v) == "table" and type(v.path) == "string" and v.path ~= "" then
+            local p = normpath(v.path)
 
-      if p and p ~= "" and is_dir(p) then
-        if not seen[p] then
-          seen[p] = true
-          local name = (type(v.name) == "string" and v.name ~= "") and v.name or basename(p)
-          out[#out + 1] = { name = name, path = p }
+            if p and p ~= "" and is_dir(p) then
+                if not seen[p] then
+                    seen[p] = true
+                    local name = (type(v.name) == "string" and v.name ~= "") and v.name or basename(p)
+                    out[#out + 1] = { name = name, path = p }
+                end
+            end
         end
-      end
     end
-  end
 
-  return (#out > 0) and out or nil
+    return (#out > 0) and out or nil
 end
 
 local function active_root()
@@ -205,24 +205,24 @@ end
 -- FS metadata (uv/fs_stat) for sorting
 --==============================================================
 local function ms(t)
-  if type(t) == "table" and type(t.sec) == "number" then
-    return t.sec * 1000 + math.floor((t.nsec or 0) / 1e6)
-  end
-  return 0
+    if type(t) == "table" and type(t.sec) == "number" then
+        return t.sec * 1000 + math.floor((t.nsec or 0) / 1e6)
+    end
+    return 0
 end
 
 local function file_times_ms(path)
-  local uv = vim.uv or vim.loop
-  local st = (path and uv) and uv.fs_stat(path) or nil
-  if not st then return 0, 0 end
+    local uv = vim.uv or vim.loop
+    local st = (path and uv) and uv.fs_stat(path) or nil
+    if not st then return 0, 0 end
 
-  local mtime = ms(st.mtime)
+    local mtime = ms(st.mtime)
 
-  local birth = ms(st.birthtime)
-  local ctime = ms(st.ctime)
-  local creation = birth ~= 0 and birth or (ctime ~= 0 and ctime or mtime)
+    local birth = ms(st.birthtime)
+    local ctime = ms(st.ctime)
+    local creation = birth ~= 0 and birth or (ctime ~= 0 and ctime or mtime)
 
-  return creation, mtime
+    return creation, mtime
 end
 
 --==============================================================
@@ -818,24 +818,24 @@ end
 -- Create / Open separation (small, focused functions)
 --==============================================================
 local function prompt_title_desc(opts, ask, note_full, cb)
-  opts = opts or {}
+    opts = opts or {}
 
-  local function with_desc(title)
-    if opts.ask_desc == false then
-      return cb(title, "")
+    local function with_desc(title)
+        if opts.ask_desc == false then
+            return cb(title, "")
+        end
+        prompt_desc(ask, function(desc)
+            cb(title, desc or "")
+        end)
     end
-    prompt_desc(ask, function(desc)
-      cb(title, desc or "")
+
+    if opts.title and opts.title ~= "" then
+        return with_desc(opts.title)
+    end
+
+    prompt_title(ask, note_full, function(title)
+        with_desc(title)
     end)
-  end
-
-  if opts.title and opts.title ~= "" then
-    return with_desc(opts.title)
-  end
-
-  prompt_title(ask, note_full, function(title)
-    with_desc(title)
-  end)
 end
 
 -- Creates a note file with frontmatter if the file does not exist.
@@ -864,54 +864,54 @@ local function open_existing_note(cwd, note_full)
 end
 
 local function open_or_create_note(opts, cwd, ask, done)
-  opts = opts or {}
+    opts = opts or {}
 
-  local function finish_open(note_full)
-    local opened, path = open_existing_note(cwd, note_full)
-    return done({
-      created = false,
-      opened = opened,
-      path = opened and path or nil,
-      note_full = note_full,
-    })
-  end
+    local function finish_open(note_full)
+        local opened, path = open_existing_note(cwd, note_full)
+        return done({
+            created = false,
+            opened = opened,
+            path = opened and path or nil,
+            note_full = note_full,
+        })
+    end
 
-  local function create_then_open(note_full)
-    prompt_title_desc(opts, ask, note_full, function(title, desc)
-      local created, path = create_note_file(cwd, note_full, title, desc, { refuse_overwrite = true })
-      local opened, _ = open_existing_note(cwd, note_full)
-      return done({
-        created = created,
-        opened = opened,
-        path = opened and path or nil,
-        note_full = note_full,
-        title = title,
-        desc = desc,
-      })
+    local function create_then_open(note_full)
+        prompt_title_desc(opts, ask, note_full, function(title, desc)
+            local created, path = create_note_file(cwd, note_full, title, desc, { refuse_overwrite = true })
+            local opened, _ = open_existing_note(cwd, note_full)
+            return done({
+                created = created,
+                opened = opened,
+                path = opened and path or nil,
+                note_full = note_full,
+                title = title,
+                desc = desc,
+            })
+        end)
+    end
+
+    local function decide(note_full)
+        if not note_full or note_full == "" then
+            return done({ created = false, opened = false, path = nil, note_full = nil })
+        end
+
+        local path = note_path(cwd, note_full)
+        if exists(path) then
+            return finish_open(note_full)
+        end
+
+        return create_then_open(note_full)
+    end
+
+    if opts.note_full and opts.note_full ~= "" then
+        return decide(opts.note_full)
+    end
+
+    local default = default_from_prefix(opts.prefix_hint)
+    prompt_note_full(ask, default, function(note_full)
+        decide(note_full)
     end)
-  end
-
-  local function decide(note_full)
-    if not note_full or note_full == "" then
-      return done({ created = false, opened = false, path = nil, note_full = nil })
-    end
-
-    local path = note_path(cwd, note_full)
-    if exists(path) then
-      return finish_open(note_full)
-    end
-
-    return create_then_open(note_full)
-  end
-
-  if opts.note_full and opts.note_full ~= "" then
-    return decide(opts.note_full)
-  end
-
-  local default = default_from_prefix(opts.prefix_hint)
-  prompt_note_full(ask, default, function(note_full)
-    decide(note_full)
-  end)
 end
 
 local function create_note_flexible(cwd, prefix_hint, ask, done)
@@ -1284,7 +1284,7 @@ function actions.delete_current_buffer()
 
     wipe_buffers_for_paths({ path })
     delete_one(path)
-    vim.notify(("[Ma] %s 1 file"):format(delete_verb()), vim.log.levels.INFO)
+    vim.notify((" [Ma] %s 1 file"):format(delete_verb()), vim.log.levels.INFO)
 end
 
 --==============================================================
