@@ -16,50 +16,23 @@ local Job = safe_require("plenary.job")
 -- Config
 --==============================================================
 M._config = {
-    vaults = { -- If nil or {}, it uses the current working directory as the root. By default the "active" vault is the first.
-        {
-            name = "Brain",
-            path = "~/Brain/notes"
-        },
-        {
-            name = "Test",
-            path = "~/Desktop/Test/"
-        }
-    },
+    vaults = {},
     respect_gitignore = true,
-    autochdir = "lcd", -- Values: false | "lcd" | "tcd" | "cd"
+    autochdir = "lcd",
     depth = nil,
     delete_to_trash = true,
     picker_actions = {
         { "c", "create" },
         { "r", "rename" },
-        { "d", "delete" },
+        { "d", "delete" }
     },
     date_format_frontmatter = "%Y %b %d - %H:%M:%S",
-    telescope = {
-        prompt_prefix = " ",
-        selection_caret = "| ",
-        initial_mode = "normal",  -- or "insert"
-        layout_config = {
-            prompt_position = "bottom",
-            -- width = 0.9,
-            -- height = 0.9,
-            -- preview_width = 0.6,
-            -- mirror = false,
-            -- preview_cutoff = 120,
-        },
-    },
-    columns = { "git", "icon" }, -- can be: { git = { modified="✱ " }, "icon" }
-    sort =
-    -- { by = "update", order = "desc" },
-    -- { by = "update", order = "asc" },
-    -- { by = "creation", order = "asc" },
-    -- { by = "creation", order = "desc" },
-    { by = "name", order = "asc" },
-    -- { by = "name", order = "desc" },
+    telescope = {},
+    columns = { "git", "icon" },
+    sort = { by = "name", order = "asc" },
     daily_notes = {
-        date_format = nil, -- optional, default "%Y.%b-%d"
-        locale = nil, -- optional, default current locale
+        date_format = nil,
+        locale = nil
     }
 }
 
@@ -556,20 +529,37 @@ local function stack_prefix(stack)
 end
 
 local function normalize_columns(columns)
-    local spec = { cols = {}, git_override = nil }
+    local spec = { cols = {}, git_override = nil, icons_override = nil }
     if type(columns) ~= "table" then return spec end
 
+    -- store overrides (do NOT decide order here)
     if type(columns.git) == "table" then
         spec.git_override = columns.git
-        spec.cols[#spec.cols + 1] = "git"
+    end
+    if type(columns.icons) == "table" then
+        spec.icons_override = columns.icons
     end
 
-    local seen = { git = (spec.git_override ~= nil) }
+    local seen = {}
+    -- 1) respect explicit array order
     for _, c in ipairs(columns) do
-        if type(c) == "string" and c ~= "" and not seen[c] then
-            spec.cols[#spec.cols + 1] = c
-            seen[c] = true
+        if type(c) == "string" and c ~= "" then
+            if c == "icon" then c = "icons" end -- legacy alias
+            if not seen[c] then
+                spec.cols[#spec.cols + 1] = c
+                seen[c] = true
+            end
         end
+    end
+
+    -- 2) if overrides exist but column not listed, append at end
+    if spec.git_override and not seen["git"] then
+        spec.cols[#spec.cols + 1] = "git"
+        seen["git"] = true
+    end
+    if spec.icons_override and not seen["icons"] then
+        spec.cols[#spec.cols + 1] = "icons"
+        seen["icons"] = true
     end
     return spec
 end
@@ -1547,7 +1537,7 @@ local function navigator(cfg)
 
     local display_items = {}
     for _, c in ipairs(columns) do
-        if c == "git" or c == "icon" then
+        if c == "git" or c == "icons" or c == "icon" then
             display_items[#display_items + 1] = { width = 2 }
         end
     end
@@ -1556,12 +1546,32 @@ local function navigator(cfg)
     local displayer = t.entry_display.create({ separator = " ", items = display_items })
 
     local function icon_for(v)
+        if not v or v.kind == "back" then return "" end
+
+        local ico_tbl = colspec and colspec.icons_override
+        if type(ico_tbl) == "table" then
+            local ico = nil
+            if v.kind == "folder" then
+                ico = ico_tbl.folder
+            else
+                ico = ico_tbl.file
+            end
+
+            if type(ico) == "string" and ico ~= "" then
+                return ico
+            end
+            -- if user sets "" intentionally, we treat it as "no icon" and fall through
+        end
+
+        -- defaults
         if v.kind == "folder" then return "" end
+
         if devicons and devicons.get_icon then
-            local filename = v.path and v.path:match("([^/\\]+)$") or (v.name .. ".md")
+            local filename = v.path and v.path:match("([^/\\]+)$") or ((v.name or "") .. ".md")
             local ext = filename:match("%.([^.]+)$") or ""
             return devicons.get_icon(filename, ext, { default = true }) or "󰈙"
         end
+
         return "󰈙"
     end
 
@@ -1583,7 +1593,7 @@ local function navigator(cfg)
         local cols = {}
         for _, c in ipairs(columns) do
             if c == "git" then cols[#cols + 1] = { git_for(v) } end
-            if c == "icon" then cols[#cols + 1] = { icon_for(v) } end
+            if c == "icons" or c == "icon" then cols[#cols + 1] = { icon_for(v) } end
         end
         cols[#cols + 1] = { v.name or "(unknown)" }
         return displayer(cols)
