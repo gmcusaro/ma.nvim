@@ -817,39 +817,25 @@ end
 --==============================================================
 -- Create / Open separation (small, focused functions)
 --==============================================================
-local function prompt_note_meta(opts, ask, cb)
-    opts = opts or {}
+local function prompt_title_desc(opts, ask, note_full, cb)
+  opts = opts or {}
 
-    local function with_desc(note_full, title)
-        if opts.ask_desc == false then
-            return cb(note_full, title, "")
-        end
-        prompt_desc(ask, function(desc)
-            cb(note_full, title, desc or "")
-        end)
+  local function with_desc(title)
+    if opts.ask_desc == false then
+      return cb(title, "")
     end
+    prompt_desc(ask, function(desc)
+      cb(title, desc or "")
+    end)
+  end
 
-    local function with_title(note_full)
-        if opts.title and opts.title ~= "" then
-            return with_desc(note_full, opts.title)
-        end
-        prompt_title(ask, note_full, function(title)
-            with_desc(note_full, title)
-        end)
-    end
+  if opts.title and opts.title ~= "" then
+    return with_desc(opts.title)
+  end
 
-    local function with_note_full()
-        if opts.note_full and opts.note_full ~= "" then
-            return with_title(opts.note_full)
-        end
-        local default = default_from_prefix(opts.prefix_hint)
-        prompt_note_full(ask, default, function(note_full)
-            if not note_full then return cb(nil, nil, nil) end
-            with_title(note_full)
-        end)
-    end
-
-    with_note_full()
+  prompt_title(ask, note_full, function(title)
+    with_desc(title)
+  end)
 end
 
 -- Creates a note file with frontmatter if the file does not exist.
@@ -878,43 +864,54 @@ local function open_existing_note(cwd, note_full)
 end
 
 local function open_or_create_note(opts, cwd, ask, done)
-    opts = opts or {}
+  opts = opts or {}
 
-    if opts.note_full and opts.note_full ~= "" then
-        local opened, path = open_existing_note(cwd, opts.note_full)
-        if opened then
-            return done({
-                created = false,
-                opened = true,
-                path = path,
-                note_full = opts.note_full,
-            })
-        end
+  local function finish_open(note_full)
+    local opened, path = open_existing_note(cwd, note_full)
+    return done({
+      created = false,
+      opened = opened,
+      path = opened and path or nil,
+      note_full = note_full,
+    })
+  end
+
+  local function create_then_open(note_full)
+    prompt_title_desc(opts, ask, note_full, function(title, desc)
+      local created, path = create_note_file(cwd, note_full, title, desc, { refuse_overwrite = true })
+      local opened, _ = open_existing_note(cwd, note_full)
+      return done({
+        created = created,
+        opened = opened,
+        path = opened and path or nil,
+        note_full = note_full,
+        title = title,
+        desc = desc,
+      })
+    end)
+  end
+
+  local function decide(note_full)
+    if not note_full or note_full == "" then
+      return done({ created = false, opened = false, path = nil, note_full = nil })
     end
 
-    prompt_note_meta(opts, ask, function(note_full, title, desc)
-        if not note_full then
-            return done({
-                created = false,
-                opened = false,
-                path = nil,
-                note_full = nil,
-            })
-        end
+    local path = note_path(cwd, note_full)
+    if exists(path) then
+      return finish_open(note_full)
+    end
 
-        local created, path = create_note_file(cwd, note_full, title, desc, { refuse_overwrite = true })
+    return create_then_open(note_full)
+  end
 
-        local opened, _ = open_existing_note(cwd, note_full)
+  if opts.note_full and opts.note_full ~= "" then
+    return decide(opts.note_full)
+  end
 
-        return done({
-            created = created,
-            opened = opened,
-            path = opened and path or nil,
-            note_full = note_full,
-            title = title,
-            desc = desc,
-        })
-    end)
+  local default = default_from_prefix(opts.prefix_hint)
+  prompt_note_full(ask, default, function(note_full)
+    decide(note_full)
+  end)
 end
 
 local function create_note_flexible(cwd, prefix_hint, ask, done)
@@ -1069,8 +1066,7 @@ local function ma_link_from_visual()
             note_full = note_full,
             ask_desc = true,
         }, cwd, ask_cmdline, function(res)
-            -- Only after the note has been created do we convert selection into a link
-            if not res or not res.created then return end
+            if not res or not res.opened then return end
 
             local target = note_full .. ".md"
             local repl = ("[%s](%s)"):format(label, target)
