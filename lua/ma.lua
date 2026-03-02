@@ -28,7 +28,7 @@ M._config = {
     },
     date_format_frontmatter = "%Y %b %d - %H:%M:%S",
     telescope = {},
-    columns = { "git", "icon" },
+    columns = { "git", "icons" },
     sort = { by = "name", order = "asc" },
     daily_notes = {
         date_format = nil,
@@ -544,7 +544,6 @@ local function normalize_columns(columns)
     -- 1) respect explicit array order
     for _, c in ipairs(columns) do
         if type(c) == "string" and c ~= "" then
-            if c == "icon" then c = "icons" end -- legacy alias
             if not seen[c] then
                 spec.cols[#spec.cols + 1] = c
                 seen[c] = true
@@ -1537,7 +1536,7 @@ local function navigator(cfg)
 
     local display_items = {}
     for _, c in ipairs(columns) do
-        if c == "git" or c == "icons" or c == "icon" then
+        if c == "git" or c == "icons" then
             display_items[#display_items + 1] = { width = 2 }
         end
     end
@@ -1593,7 +1592,7 @@ local function navigator(cfg)
         local cols = {}
         for _, c in ipairs(columns) do
             if c == "git" then cols[#cols + 1] = { git_for(v) } end
-            if c == "icons" or c == "icon" then cols[#cols + 1] = { icon_for(v) } end
+            if c == "icons" then cols[#cols + 1] = { icon_for(v) } end
         end
         cols[#cols + 1] = { v.name or "(unknown)" }
         return displayer(cols)
