@@ -16,7 +16,9 @@ local Job = safe_require("plenary.job")
 -- Config
 --==============================================================
 M._config = {
-    vaults = {},
+    vaults = {
+        -- If nil or {}, it uses the current working directory as the root. By default the "active" vault is the first.
+    },
     respect_gitignore = true,
     autochdir = "lcd",
     depth = nil,
@@ -24,15 +26,15 @@ M._config = {
     picker_actions = {
         { "c", "create" },
         { "r", "rename" },
-        { "d", "delete" }
+        { "d", "delete" },
     },
     date_format_frontmatter = "%Y %b %d - %H:%M:%S",
     telescope = {},
     columns = { "git", "icons" },
     sort = { by = "name", order = "asc" },
     daily_notes = {
-        date_format = nil,
-        locale = nil
+        date_format = nil, -- default "%Y.%b-%d"
+        locale = nil, -- default current locale
     }
 }
 
@@ -152,6 +154,70 @@ local function normalize_vaults(vault)
     end
 
     return (#out > 0) and out or nil
+end
+
+local vault_cache = {
+    source = nil,
+    list = nil,
+    by_name = {},
+    by_name_lc = {},
+}
+
+local function build_vault_name_index(vaults)
+    local by_name, by_name_lc = {}, {}
+    for _, v in ipairs(vaults or {}) do
+        local name = type(v.name) == "string" and v.name or ""
+        if name ~= "" then
+            by_name[name] = by_name[name] or v
+            local lc = name:lower()
+            by_name_lc[lc] = by_name_lc[lc] or v
+        end
+    end
+    return by_name, by_name_lc
+end
+
+local function refresh_vault_cache(force)
+    local src = M._config.vaults
+    if not force and vault_cache.source == src then
+        return vault_cache.list
+    end
+
+    local vaults = normalize_vaults(src)
+    local by_name, by_name_lc = build_vault_name_index(vaults)
+    if vaults then
+        M._config.vaults = vaults
+    end
+
+    vault_cache.source = M._config.vaults
+    vault_cache.list = vaults
+    vault_cache.by_name = by_name
+    vault_cache.by_name_lc = by_name_lc
+
+    return vault_cache.list
+end
+
+local function configured_vaults()
+    return refresh_vault_cache(false)
+end
+
+local function configured_vaults_or_warn()
+    local vaults = configured_vaults()
+    if vaults then return vaults end
+    vim.notify("[Ma.nvim] no vaults configured", vim.log.levels.WARN)
+    return nil
+end
+
+local function find_vault_by_name(name)
+    local target = trim(name or "")
+    if target == "" then return nil end
+
+    return vault_cache.by_name[target] or vault_cache.by_name_lc[target:lower()]
+end
+
+local function activate_vault(vault)
+    if not vault then return end
+    M._config._active_vault = vault
+    vim.schedule(function() M.navigate() end)
 end
 
 local function active_root()
@@ -1407,11 +1473,8 @@ local function pick_vault()
         return
     end
 
-    local vaults = normalize_vaults(M._config.vaults)
-    if not vaults then
-        vim.notify("[Ma.nvim] no vaults configured", vim.log.levels.WARN)
-        return
-    end
+    local vaults = configured_vaults_or_warn()
+    if not vaults then return end
 
     t.pickers.new(telescope_opts() or {}, {
         prompt_title = "Ma: vault",
@@ -1432,14 +1495,26 @@ local function pick_vault()
                 local v = sel and sel.value
                 if not v then return end
                 t.actions.close(bufnr)
-                M._config._active_vault = v
-                vim.schedule(function() M.navigate() end)
+                activate_vault(v)
             end
             map("i", "<CR>", choose)
             map("n", "<CR>", choose)
             return true
         end,
     }):find()
+end
+
+local function pick_vault_by_name(name)
+    local vaults = configured_vaults_or_warn()
+    if not vaults then return end
+
+    local v = find_vault_by_name(name)
+    if not v then
+        vim.notify(("[Ma.nvim] vault not found: %s"):format(name), vim.log.levels.WARN)
+        return
+    end
+
+    activate_vault(v)
 end
 
 --==============================================================
@@ -1850,7 +1925,11 @@ local function create_commands()
         end
 
         if sub == "vault" then
-            return pick_vault()
+            local target = trim(table.concat(opts.fargs or {}, " ", 2))
+            if target == "" then
+                return pick_vault()
+            end
+            return pick_vault_by_name(target)
         end
 
         if sub == "daily" then
@@ -1879,7 +1958,19 @@ local function create_commands()
         vim.notify("[Ma] unknown subcommand: " .. sub, vim.log.levels.ERROR)
     end, {
     nargs = "*",
-    complete = function()
+    complete = function(arglead, cmdline)
+        local is_vault_arg = (cmdline or ""):match("^%s*:?[Mm][Aa]%s+vault%s+")
+        if is_vault_arg then
+            local out = {}
+            local lead = (arglead or ""):lower()
+            for _, v in ipairs(configured_vaults() or {}) do
+                local name = v.name or ""
+                if name ~= "" and (lead == "" or name:lower():find("^" .. vim.pesc(lead))) then
+                    out[#out + 1] = name
+                end
+            end
+            return out
+        end
         return { "create", "link", "rename", "delete", "vault", "daily" }
     end,
 })
@@ -1916,9 +2007,20 @@ M.setup = function(user_opts)
 
     M._config = vim.tbl_deep_extend("force", M._config, incoming)
 
-    M._config.vaults = normalize_vaults(M._config.vaults)
-    if not M._config._active_vault then
-        M._config._active_vault = (M._config.vaults and M._config.vaults[1]) or nil
+    local vaults = refresh_vault_cache(true)
+    local active = M._config._active_vault
+    local active_path = active and active.path and normpath(active.path) or nil
+    if active_path and vaults then
+        local matched = nil
+        for _, v in ipairs(vaults) do
+            if v.path == active_path then
+                matched = v
+                break
+            end
+        end
+        M._config._active_vault = matched or vaults[1]
+    elseif not active then
+        M._config._active_vault = (vaults and vaults[1]) or nil
     end
 
     create_commands()
