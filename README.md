@@ -73,7 +73,7 @@ opts = {
 
 ## Usage
 
-Run `:Ma` to parse your notes by filename segments (`.` for hierarchy, `-` for words) and explore them through Telescope. Read [docs](https://...)
+Run `:Ma` to parse your notes by filename segments (`.` for hierarchy, `-` for words) and explore them through Telescope. Read [docs](https://github.com/gmcusaro/ma.nvim/wiki/Ma.nvim-Docs)
 
 ## Ma setup structure
 
