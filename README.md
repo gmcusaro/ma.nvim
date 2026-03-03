@@ -1,5 +1,9 @@
 # Ma.nvim
 
+<div align="center">
+<img width="513" height="513" alt="Image" src="https://github.com/user-attachments/assets/979f03be-a134-47d4-a98e-272656dfa3ef" />
+</div>
+
 A minimal knowledge layer for Markdown in [Neovim](https://neovim.io).
 
 Ma.nvim lets structure emerge from filenames rather than directories. Notes live in a flat filesystem, while hierarchy is inferred through dot-separated segments and hyphenated words.
