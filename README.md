@@ -1,7 +1,7 @@
 # Ma.nvim
 
 <div align="center">
-<img width="513" height="513" alt="Image" src="https://github.com/user-attachments/assets/979f03be-a134-47d4-a98e-272656dfa3ef" />
+<img width="200" height="200" alt="Image" src="https://github.com/user-attachments/assets/979f03be-a134-47d4-a98e-272656dfa3ef" />
 </div>
 
 A minimal knowledge layer for Markdown in [Neovim](https://neovim.io).
