@@ -3,7 +3,7 @@
 ![NVIM](https://img.shields.io/badge/Neovim-57A143?style=flat-square&logo=neovim&logoColor=white)
 
 <div align="center">
-<img width="200" height="200" alt="Image" src="https://github.com/user-attachments/assets/979f03be-a134-47d4-a98e-272656dfa3ef" />
+<img width="150" height="150" alt="Image" src="https://github.com/user-attachments/assets/979f03be-a134-47d4-a98e-272656dfa3ef" />
 </div>
 <br>
 
@@ -34,10 +34,11 @@ Example note name:
 
 Ma interprets this as a hierarchy:
 
-&nbsp;📁 architecture__
-&nbsp;└ 📁 norman-foster__
-&nbsp;└ 📄 apple-piazza-liberty
+📁 architecture
 
+└ 📁 norman-foster
+
+  └ 📄 apple-piazza-liberty
 
 ![ma navigation preview](ma-navigation-preview.png)
 
