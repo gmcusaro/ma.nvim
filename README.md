@@ -28,7 +28,7 @@ In Ma.nvim, structure is not imposed through folders. It emerges in the interval
 
 Ma also implies time: the pause between actions, the space we take to write, reflect, and connect ideas in plain text.
 
-Example note name:
+### Example file name
 
 *architecture.norman-foster.apple-piazza-liberty.md*
 
@@ -37,7 +37,8 @@ Ma interprets this as a hierarchy:
 📁 architecture<br />
 └ 📁 norman-foster<br />
   └ 📄 apple-piazza-liberty
-<br />
+
+
 ![ma navigation preview](ma-navigation-preview.png)
 
 ## Getting Started
