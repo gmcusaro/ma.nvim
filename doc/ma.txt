@@ -1,0 +1,414 @@
+*ma.txt*                           Ma.nvim                           *ma.nvim*
+
+Author: Giovanni Maria Cusaro
+License: MIT
+
+Ma.nvim lets structure emerge from filenames rather than directories.
+Notes live in a flat filesystem, while hierarchy is inferred through
+dot-separated segments and hyphenated words.
+
+==============================================================================
+CONTENTS                                                     *ma-contents*
+
+1. Overview ......................................... |ma-overview|
+2. Dependencies ..................................... |ma-dependencies|
+3. Default Setup .................................... |ma-setup|
+4. Commands ......................................... |ma-commands|
+5. Picker Behavior .................................. |ma-picker-behavior|
+6. Configuration Reference........................... |ma-configuration-reference|
+   6.1 vaults ....................................... |ma-option-vaults|
+   6.2 respect_gitignore ............................ |ma-option-respect-gitignore|
+   6.3 autochdir .................................... |ma-option-autochdir|
+   6.4 depth ........................................ |ma-option-depth|
+   6.5 delete_to_trash .............................. |ma-option-delete-to-trash|
+   6.6 picker_actions ............................... |ma-option-picker-actions|
+   6.7 date_format_frontmatter ...................... |ma-option-date-format-frontmatter|
+   6.8 telescope .................................... |ma-option-telescope|
+   6.9 columns ...................................... |ma-option-columns|
+   6.10 sort ........................................ |ma-option-sort|
+   6.11 daily_notes ................................. |ma-option-daily-notes|
+7. Frontmatter ...................................... |ma-frontmatter|
+
+==============================================================================
+1. Overview                                                    *ma-overview*
+
+Ma.nvim lets structure emerge from filenames rather than directories.
+Notes live in a flat filesystem, while hierarchy is inferred through
+dot-separated segments and hyphenated words.
+
+**Ma** (間) is a Japanese concept often translated as *interval* or
+*space between*.
+
+It does not mean emptiness as absence.
+It refers to meaningful space: the gap that makes relationships possible.
+
+In Ma.nvim, structure is not imposed through folders.
+It emerges in the intervals:
+
+- Dots define hierarchy.
+- Hyphens define words.
+- Meaning lives in the space between segments.
+
+Ma also implies time: the pause between actions, the space we take
+to write, reflect, and connect ideas in plain text.
+
+==============================================================================
+2. Dependencies                                            *ma-dependencies*
+
+Required:
+  - nvim-lua/plenary.nvim
+
+Required for navigator and vault picker:
+  - nvim-telescope/telescope.nvim
+
+Optional:
+  - nvim-tree/nvim-web-devicons (filetype-aware icons in `icons` column)
+  - telescope-fzf-native.nvim for faster picker matching
+  - Marksman (Markdown LSP) for `gd` on links, semantic link resolution, and
+    document symbols
+
+Without devicons, Ma.nvim falls back to built-in folder/file icons.
+
+==============================================================================
+3. Default Setup                                                          *ma-setup*
+
+>
+  require("ma").setup({
+    vaults = {
+      { name = "My Brain", path = "~/notes" },
+    },
+    respect_gitignore = true,
+    autochdir = "lcd",
+    depth = nil,
+    delete_to_trash = true,
+    picker_actions = {
+      { "c", "create" },
+      { "r", "rename" },
+      { "d", "delete" },
+    },
+    date_format_frontmatter = "%Y %b %d - %H:%M:%S",
+    telescope = {},
+    columns = { "git", "icons" },
+    sort = { by = "name", order = "asc" },
+    daily_notes = {
+      date_format = nil,
+      locale = nil,
+    }
+  })
+<
+
+==============================================================================
+4. Commands                                                    *ma-commands*
+
+:Ma                                                             *:Ma*
+    Open the Telescope navigator for the active root. Use it to browse notes as
+    a dot-based tree and run picker actions.
+
+:Ma vault                                                       *:Ma-vault*
+    Open the vault picker and switch the active vault.
+
+:Ma vault {name}                                                *:Ma-vault-name*
+    Switch directly to an existing configured vault by name.
+
+    When a vault is selected, Ma sets it as active and reopens navigation in
+    that vault. The *active root* is the currently selected vault path, or
+    Neovim's current working directory if no valid vault is configured.
+
+:Ma create                                                      *:Ma-create*
+    Create or open a note.
+    - If the note exists: open it.
+    - If missing: prompt for name/title/optional description, write frontmatter
+      and open.
+
+    Name handling:
+    - `.md` is added automatically if omitted.
+    - Existing `.md` or `.markdown` suffixes are normalized and not duplicated.
+    - `/` is normalized to `.`.
+    - Spaces are normalized to `-`.
+
+:Ma daily                                                       *:Ma-daily*
+    Create or open the daily note. Use it to keep daily journal/log notes.
+    Creates `daily.<formatted-date>.md`.
+
+:Ma rename                                                      *:Ma-rename*
+    Rename the current managed markdown note under the active root.
+    This command renames only the current note file.
+
+    Picker folder rename (multi-file):
+    Renaming a folder segment in the navigator picker also renames all notes
+    sharing that prefix.
+    Example:
+      architecture.foster.apple-piazza-liberty
+      -> architecture.norman-foster.apple-piazza-liberty
+    also updates:
+      architecture.foster.30-st-mary-axe
+      architecture.foster.millennium-bridge
+
+:Ma delete                                                      *:Ma-delete*
+    Delete the current note with confirmation.
+    Works only for managed markdown notes under the active root.
+    In the navigator picker, multi-select deletion is supported via
+    Telescope multi-select.
+    Uses trash-first or hard-delete behavior based on `delete_to_trash`.
+
+:Ma link                                                        *:Ma-link*
+    Visual-mode command. Replaces current visual selection with a markdown
+    link:
+      [label](target.md)
+    Prompts for target note and opens/creates it.
+    Target note names are normalized and lowercased.
+
+==============================================================================
+5. Picker Behavior                                        *ma-picker-behavior*
+
+In the navigator picker:
+- <CR>           open folder/file
+- <BS> (normal)  go up when prompt is empty
+- - (normal)     force go up
+- <C-h> (insert) force go up
+- action keys    from `picker_actions` (normal mode)
+- multi-select + delete is supported
+
+==============================================================================
+6. Configuration Reference                      *ma-configuration-reference*
+
+6.1 `vaults`                                              *ma-option-vaults*
+Type: >
+  { { name?: string, path: string } } | nil
+<
+Default: >
+  {}
+<
+Behavior:
+  - invalid/non-existing paths are ignored
+  - duplicate paths are deduplicated
+  - missing/empty `name` uses folder basename
+  - first valid vault becomes active by default
+  - if no valid vault exists, Ma.nvim uses current working directory
+
+6.2 `respect_gitignore`                      *ma-option-respect-gitignore*
+Type: >
+  boolean
+<
+Default: >
+  true
+<
+Behavior:
+  Control whether scans exclude files ignored by `.gitignore`.
+
+6.3 `autochdir`                                      *ma-option-autochdir*
+Type: >
+  false | "lcd" | "tcd" | "cd"
+<
+Default: >
+  "lcd"
+<
+Behavior:
+  - false: do not change directory
+  - "lcd": window-local cwd
+  - "tcd": tab-local cwd
+  - "cd": global cwd
+
+Control whether Ma changes Neovim working directory to the active root
+before major actions.
+Applied before navigation, linking, creating, and daily note operations.
+
+6.4 `depth`                                            *ma-option-depth*
+Type: >
+  integer | nil
+<
+Default: >
+  nil
+<
+Behavior:
+  - `nil`: unlimited recursion
+  - integer: scan only up to that depth
+
+Use when the vault is large and you want faster scans.
+
+6.5 `delete_to_trash`                           *ma-option-delete-to-trash*
+Type: >
+  boolean
+<
+Default: >
+  true
+<
+Behavior:
+  When true, Ma tries OS trash tools first (`osascript` on macOS, `gio`,
+  `trash-put`, `kioclient5`) and falls back to file removal.
+
+6.6 `picker_actions`                              *ma-option-picker-actions*
+Type: >
+  { { string, "create"|"rename"|"delete" } } |
+  { [string]: "create"|"rename"|"delete" } | false
+<
+Default: >
+  {
+    { "c", "create" },
+    { "r", "rename" },
+    { "d", "delete" },
+  }
+<
+Behavior:
+  - `false` disables picker actions
+  - list order is preserved
+  - legacy map forms are accepted
+
+Example:
+
+```lua
+picker_actions = {
+  { "n", "create" },
+  { "x", "delete" },
+}
+```
+
+Use when:
+- You want custom action keys in Telescope.
+
+6.7 `date_format_frontmatter`        *ma-option-date-format-frontmatter*
+Type: >
+  string
+<
+Default: >
+  "%Y %b %d - %H:%M:%S"
+<
+Behavior:
+  Used for `created`/`updated` timestamps in frontmatter.
+  `updated` is refreshed only if:
+  - frontmatter exists at top of file
+  - frontmatter already has an `updated:` key
+
+Example:
+
+```lua
+date_format_frontmatter = "%Y-%m-%d %H:%M"
+```
+
+6.8 `telescope`                                    *ma-option-telescope*
+Type: >
+  table
+<
+Default: >
+  {}
+<
+Behavior:
+  Supported keys are: `prompt_prefix`, `selection_caret`, `initial_mode`,
+  and `layout_config`.
+  `initial_mode` accepts only `"insert"` or `"normal"`.
+  Other Telescope keys are ignored by Ma.nvim.
+
+6.9 `columns`                                        *ma-option-columns*
+Type: >
+  table
+<
+Default: >
+  { "git", "icons" }
+<
+Behavior:
+  - supported columns: `"git"`, `"icons"`
+  - order controls display order
+  - if `git` column is disabled, git status is not computed
+
+`columns.git`                                      *ma-option-columns-git*
+Type: >
+  table
+<
+Behavior:
+  Override git status symbols. Supplying `git = {...}` auto-enables the git
+  column.
+  If you override symbols, statuses not explicitly set may render as blank.
+
+Built-in statuses:
+  - clean
+  - modified
+  - added
+  - deleted
+  - renamed
+  - copied
+  - untracked
+  - ignored
+  - conflicted
+  - unknown
+
+`columns.icons`                                  *ma-option-columns-icons*
+Type: >
+  { folder?: string, file?: string }
+<
+Behavior:
+  - supplying `icons = {...}` auto-enables icons column
+  - non-empty `icons.folder`/`icons.file` values are used directly
+  - without custom values:
+    - folders use fallback ``
+    - files use `nvim-web-devicons` when available, else fallback `󰈙`
+
+6.10 `sort`                                           *ma-option-sort*
+Type: >
+  { by?: "name"|"update"|"creation", order?: "asc"|"desc" }
+<
+Default: >
+  { by = "name", order = "asc" }
+<
+Behavior:
+  - `name`: case-insensitive by segment text
+  - `update`: file mtime
+  - `creation`: birthtime/ctime fallback
+  - ties fall back to full note path for deterministic order
+
+6.11 `daily_notes`                                *ma-option-daily-notes*
+Type: >
+  table | false
+<
+Default: >
+  { date_format = nil, locale = nil }
+<
+Behavior:
+  - `false`: disables `:Ma daily`
+  - table: creates/opens `daily.<date>.md`
+
+`daily_notes.date_format`                 *ma-option-daily-notes-date-format*
+Type: >
+  string | nil
+<
+Default: >
+  "%Y.%b-%d"   (when nil)
+<
+Behavior:
+  Date pattern used in daily filename and title.
+
+`daily_notes.locale`                           *ma-option-daily-notes-locale*
+Type: >
+  string | nil
+<
+Default: >
+  nil
+<
+Behavior:
+  Temporarily sets `os.setlocale(locale, "time")` while formatting the daily date.
+
+==============================================================================
+7. Frontmatter                                              *ma-frontmatter*
+
+When creating notes via `:Ma create` or `:Ma daily`, Ma.nvim writes:
+
+>
+  ---
+  id: <23-char random id>
+  title: <title>
+  desc: <desc>
+  updated: <formatted timestamp>
+  created: <formatted timestamp>
+  ---
+<
+
+Behavior:
+  - frontmatter is written only when a note file is newly created;
+    opening an existing note does not insert or rewrite frontmatter
+  - `created` and `updated` use `date_format_frontmatter`
+  - on `BufWritePre`, Ma.nvim refreshes `updated` for managed markdown files
+    under active root
+  - files without frontmatter are not modified
+  - the `id` field is generated automatically and currently not used for
+    indexing or linking
+
+==============================================================================
