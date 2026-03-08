@@ -35,9 +35,7 @@ Example note name:
 Ma interprets this as a hierarchy:
 
 📁 architecture
-
 └ 📁 norman-foster
-
   └ 📄 apple-piazza-liberty
 
 ![ma navigation preview](ma-navigation-preview.png)
