@@ -54,7 +54,7 @@ Ma interprets this as a hierarchy:
 - [nvim-telescope/telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) for navigator and vault picker
 
 **Optional:**
-- [nvim-tree/nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) for filetype-aware icons in the `icons` column. If missing, Ma falls back to built-in icons (`` folders, `󰈙` files).
+- [nvim-tree/nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) for filetype-aware icons in the `icons` column. If missing, Ma falls back to built-in icons (📁 folders, 📄 files).
 - [telescope-fzf-native.nvim](https://github.com/nvim-telescope/telescope-fzf-native.nvim) for faster picker matching.
 - [Marksman (Markdown LSP)](https://github.com/artempyanykh/marksman) for `gd` on links, semantic link resolution, and document symbols.
 
