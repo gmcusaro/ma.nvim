@@ -11,7 +11,7 @@ A minimal knowledge layer for Markdown in [Neovim](https://neovim.io).
 
 Ma.nvim lets structure emerge from filenames rather than directories. Notes live in a flat filesystem, while hierarchy is inferred through dot-separated segments and hyphenated words.
 
-Inspired by [Dendron](https://www.dendron.so) and [Obsidian](https://obsidian.md), Ma provides vault-scoped navigation and safe file operations without imposing folder-based structure.
+Inspired by [Dendron](https://www.dendron.so) and [Obsidian](https://obsidian.md), Ma provides vault-scoped navigation and safe file operations without imposing a folder-based structure.
 
 ## Why Ma?
 
@@ -54,7 +54,7 @@ Ma interprets this as a hierarchy:
 - [nvim-telescope/telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) for navigator and vault picker
 
 **Optional:**
-- [nvim-tree/nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) for filetype-aware icons in the `icons` column. If missing, Ma falls back to built-in icons (📁 folders, 📄 files).
+- [nvim-tree/nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) for filetype-aware file icons in the `icons` column. If missing, Ma falls back to built-in defaults (`` for folders, `󰈙` for files).
 - [telescope-fzf-native.nvim](https://github.com/nvim-telescope/telescope-fzf-native.nvim) for faster picker matching.
 - [Marksman (Markdown LSP)](https://github.com/artempyanykh/marksman) for `gd` on links, semantic link resolution, and document symbols.
 
@@ -260,7 +260,7 @@ Use when:
 
 ### `autochdir`
 
-Control whether Ma changes Neovim working directory to the active root before major actions.
+Control whether Ma changes Neovim's working directory to the active root before major actions.
 
 Type:
 - `false | "lcd" | "tcd" | "cd"`
@@ -509,9 +509,8 @@ Type:
 Behavior:
 - `icons = {...}` auto-enables the icons column if missing.
 - A non-empty `icons.folder` or `icons.file` value is used directly.
-- Without a custom value:
-  - folders use fallback ``
-  - files use `nvim-web-devicons` when available, else fallback `󰈙`
+- Without a custom `folder` icon, Ma uses fallback ``.
+- Without a custom `file` icon, Ma uses `nvim-web-devicons` when available, else fallback `󰈙`.
 
 Examples:
 
@@ -581,7 +580,7 @@ Example:
 
 ```lua
 daily_notes = {
-  date_format = "%Y.%m.%d",
+  date_format = "%Y.%b.%d",
   locale = "en_US.UTF-8",
 }
 ```

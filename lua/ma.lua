@@ -1634,7 +1634,7 @@ local function navigator(cfg)
             if type(ico) == "string" and ico ~= "" then
                 return ico
             end
-            -- if user sets "" intentionally, we treat it as "no icon" and fall through
+            -- Empty strings behave like unset values and fall back below.
         end
 
         -- defaults

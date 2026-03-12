@@ -72,12 +72,13 @@ Required for navigator and vault picker:
   - nvim-telescope/telescope.nvim
 
 Optional:
-  - nvim-tree/nvim-web-devicons (filetype-aware icons in `icons` column)
+  - nvim-tree/nvim-web-devicons (filetype-aware file icons in `icons` column)
   - telescope-fzf-native.nvim for faster picker matching
   - Marksman (Markdown LSP) for `gd` on links, semantic link resolution, and
     document symbols
 
-Without devicons, Ma.nvim falls back to built-in folder/file icons.
+Without devicons, Ma.nvim falls back to built-in defaults (`` folders, `󰈙`
+files).
 
 ==============================================================================
 3. Default Setup                                                          *ma-setup*
@@ -150,7 +151,7 @@ Without devicons, Ma.nvim falls back to built-in folder/file icons.
     Example:
       architecture.foster.apple-piazza-liberty
       -> architecture.norman-foster.apple-piazza-liberty
-    also updates:
+    Also updates:
       architecture.foster.30-st-mary-axe
       architecture.foster.millennium-bridge
 
@@ -219,7 +220,7 @@ Behavior:
   - "tcd": tab-local cwd
   - "cd": global cwd
 
-Control whether Ma changes Neovim working directory to the active root
+Control whether Ma changes Neovim's working directory to the active root
 before major actions.
 Applied before navigation, linking, creating, and daily note operations.
 
@@ -348,9 +349,9 @@ Type: >
 Behavior:
   - supplying `icons = {...}` auto-enables icons column
   - non-empty `icons.folder`/`icons.file` values are used directly
-  - without custom values:
-    - folders use fallback ``
-    - files use `nvim-web-devicons` when available, else fallback `󰈙`
+  - without a custom `folder` icon, Ma uses fallback ``
+  - without a custom `file` icon, Ma uses `nvim-web-devicons` when
+    available, else fallback `󰈙`
 
 6.10 `sort`                                           *ma-option-sort*
 Type: >
