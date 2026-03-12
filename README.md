@@ -3,7 +3,7 @@
 ![NVIM](https://img.shields.io/badge/Neovim-57A143?style=flat-square&logo=neovim&logoColor=white)
 
 <div align="center">
-<img width="150" height="150" alt="Image" src="ma-logo.webp" />
+<img width="150" height="150" alt="Image" src="assets/ma-logo.webp" />
 </div>
 <br>
 
@@ -39,7 +39,7 @@ Ma interprets this as a hierarchy:
   └ 📄 apple-piazza-liberty
 
 
-![ma navigation preview](ma-navigation-preview.webp)
+![ma navigation preview](assets/ma-navigation-preview.webp)
 
 ## Getting Started
 
