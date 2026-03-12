@@ -586,7 +586,7 @@ daily_notes = {
 }
 ```
 
-Example output: `daily.2026.Mar-03.md`
+Example output: `daily.2026.Mar.03.md`
 
 Use when:
 - You maintain date-based daily notes.
