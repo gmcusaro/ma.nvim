@@ -87,7 +87,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 require("ma").setup({
   vaults = {
-    { name = "My Brain", path = "~/notes" },
+      -- your vaults
   },
   respect_gitignore = true,
   autochdir = "lcd",
