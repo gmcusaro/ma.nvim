@@ -120,6 +120,21 @@ local function is_under(path, root)
     return nextch == "" or nextch == "/"
 end
 
+local function relative_to_root(path, root)
+    path = (path or ""):gsub("\\", "/")
+    root = ((root or ""):gsub("\\", "/")):gsub("/+$", "")
+
+    if root == "" then return path end
+    if path == root then return "" end
+    if root == "/" then return path:sub(2) end
+
+    local prefix = root .. "/"
+    if path:sub(1, #prefix) == prefix then
+        return path:sub(#prefix + 1)
+    end
+    return path
+end
+
 --==============================================================
 -- Vault utils (root selection + chdir)
 --==============================================================
@@ -504,17 +519,20 @@ local function split_dots(name)
     return t
 end
 
-local function sorted_child_segments(node)
-    local segs = {}
-    for seg, _ in pairs(node.children or {}) do
-        segs[#segs + 1] = seg
-    end
-    table.sort(segs)
-    return segs
-end
-
 local function node_has_children(node)
     return node and node.children and next(node.children) ~= nil
+end
+
+local function accumulate_node_stats(node, git, creation_ms, update_ms)
+    node.git = git_worst(node.git, git or "clean")
+
+    creation_ms = creation_ms or 0
+    if creation_ms > 0 then
+        local current = node.creation_ms or 0
+        node.creation_ms = current == 0 and creation_ms or math.min(current, creation_ms)
+    end
+
+    node.update_ms = math.max(node.update_ms or 0, update_ms or 0)
 end
 
 local function build_tree(files, git_map)
@@ -531,50 +549,37 @@ local function build_tree(files, git_map)
     for _, item in ipairs(files) do
         local parts = split_dots(item.note)
         local node = root
-        local acc = {}
+        local full = ""
+        local git = (git_map and item.path and git_map[item.path]) or "clean"
+        local creation_ms = item.creation_ms or 0
+        local update_ms = item.update_ms or 0
+
+        accumulate_node_stats(node, git, creation_ms, update_ms)
 
         for _, seg in ipairs(parts) do
-            acc[#acc + 1] = seg
-            node.children[seg] = node.children[seg] or {
-                seg = seg,
-                full = table.concat(acc, "."),
-                children = {},
-                file = nil,
-                git = "clean",
-                creation_ms = 0,
-                update_ms = 0,
-            }
-            node = node.children[seg]
+            full = (full == "") and seg or (full .. "." .. seg)
+
+            local child = node.children[seg]
+            if not child then
+                child = {
+                    seg = seg,
+                    full = full,
+                    children = {},
+                    file = nil,
+                    git = "clean",
+                    creation_ms = 0,
+                    update_ms = 0,
+                }
+                node.children[seg] = child
+            end
+
+            node = child
+            accumulate_node_stats(node, git, creation_ms, update_ms)
         end
 
         node.file = item.path
-        node.git = (git_map and item.path and git_map[item.path]) or node.git
-        node.creation_ms = item.creation_ms or 0
-        node.update_ms = item.update_ms or 0
     end
 
-    local function dfs(n)
-        local best_git = n.git or "clean"
-        local min_creation = (n.creation_ms or 0)
-        local max_update = (n.update_ms or 0)
-
-        for _, c in pairs(n.children or {}) do
-            dfs(c)
-            best_git = git_worst(best_git, c.git)
-
-            local cc = (c.creation_ms or 0)
-            if cc > 0 then
-                min_creation = (min_creation == 0) and cc or math.min(min_creation, cc)
-            end
-
-            max_update = math.max(max_update, (c.update_ms or 0))
-        end
-
-        n.git = best_git
-        n.creation_ms = min_creation
-        n.update_ms = max_update
-    end
-    dfs(root)
     return root
 end
 
@@ -630,7 +635,7 @@ local function normalize_columns(columns)
 end
 
 local function scan_notes_tree(cfg)
-    if not (scandir and Path) then
+    if not scandir then
         vim.notify("[Ma] plenary.nvim is required", vim.log.levels.ERROR)
         return nil, nil, nil
     end
@@ -651,6 +656,7 @@ local function scan_notes_tree(cfg)
         add_dirs = false,
         depth = cfg.depth,
         respect_gitignore = respect_gitignore,
+        search_pattern = is_note_file,
     })
 
     local sort = cfg.sort or M._config.sort or {}
@@ -659,33 +665,21 @@ local function scan_notes_tree(cfg)
 
     local files = {}
     for _, abs in ipairs(paths) do
-        if is_note_file(abs) then
-            abs = normpath(abs) or abs
-            local rel = abs
-            local pobj = P(abs)
-            if pobj and pobj.make_relative then
-                rel = pobj:make_relative(cwd)
-            else
-                local a = abs:gsub("\\", "/")
-                local c = (cwd or ""):gsub("\\", "/"):gsub("/+$", "")
-                rel = (c ~= "" and a:sub(1, #c) == c) and a:sub(#c + 2) or a
-            end
+        abs = normpath(abs) or abs
+        local rel = relative_to_root(abs, cwd)
+        local note_full = rel:gsub("%.[^.]+$", ""):gsub("/", ".")
+        local creation_ms, update_ms = 0, 0
 
-            rel = (rel or ""):gsub("\\", "/")
-            local note_full = rel:gsub("%.[^.]+$", ""):gsub("/", ".")
-            local creation_ms, update_ms = 0, 0
-
-            if need_times then
-                creation_ms, update_ms = file_times_ms(abs)
-            end
-
-            files[#files + 1] = {
-                path = abs,
-                note = note_full,
-                creation_ms = creation_ms,
-                update_ms = update_ms,
-            }
+        if need_times then
+            creation_ms, update_ms = file_times_ms(abs)
         end
+
+        files[#files + 1] = {
+            path = abs,
+            note = note_full,
+            creation_ms = creation_ms,
+            update_ms = update_ms,
+        }
     end
     return cwd, build_tree(files, git_map), git_map
 end
@@ -699,7 +693,7 @@ local function update_frontmatter_updated(bufnr)
     if #lines < 3 or lines[1] ~= "---" then return end
 
     local fm_end
-    for i = 2, math.min(#lines, 200) do
+    for i = 2, #lines do
         if lines[i] == "---" then fm_end = i break end
     end
     if not fm_end then return end
@@ -1148,25 +1142,26 @@ local function delete_verb()
     return (M._config.delete_to_trash and "trashed") or "deleted"
 end
 
-local function gather_files_under(node)
+local function collect_note_files(node)
     local out = {}
-    if node.file then out[#out + 1] = node.file end
-    for _, seg in ipairs(sorted_child_segments(node)) do
-        local child = node.children[seg]
-        local sub = gather_files_under(child)
-        for _, p in ipairs(sub) do out[#out + 1] = p end
-    end
-    return out
-end
 
-local function gather_note_files_with_full(node)
-    local out = {}
-    if node.file then out[#out + 1] = { full = node.full, path = node.file } end
-    for _, seg in ipairs(sorted_child_segments(node)) do
-        local child = node.children[seg]
-        local sub = gather_note_files_with_full(child)
-        for _, it in ipairs(sub) do out[#out + 1] = it end
+    local function visit(current)
+        if current.file then
+            out[#out + 1] = { full = current.full, path = current.file }
+        end
+        for _, child in pairs(current.children or {}) do
+            visit(child)
+        end
     end
+
+    visit(node)
+    table.sort(out, function(a, b)
+        local fa = tostring(a.full or a.path or "")
+        local fb = tostring(b.full or b.path or "")
+        if fa ~= fb then return fa < fb end
+        return tostring(a.path or "") < tostring(b.path or "")
+    end)
+
     return out
 end
 
@@ -1182,7 +1177,7 @@ function actions.rename(cwd, selection, on_done)
             new_prefix = trim(new_prefix)
             if new_prefix == "" then return on_done(false) end
 
-            local items = gather_note_files_with_full(selection.node)
+            local items = collect_note_files(selection.node)
             if #items == 0 then
                 vim.notify("[Ma] folder has no note files to rename", vim.log.levels.WARN)
                 return on_done(false)
@@ -1251,8 +1246,8 @@ function actions.delete(selection, on_done)
             if not first_sel then first_sel = sel end
 
             if sel.kind == "folder" then
-                local sub = gather_files_under(sel.node)
-                for _, p in ipairs(sub) do paths[#paths + 1] = p end
+                local sub = collect_note_files(sel.node)
+                for _, it in ipairs(sub) do paths[#paths + 1] = it.path end
             elseif sel.path then
                 paths[#paths + 1] = sel.path
             end
@@ -1676,13 +1671,12 @@ local function navigator(cfg)
     local function build_entries(node)
         local results = {}
 
-        for _, seg in ipairs(sorted_child_segments(node)) do
-            local child = node.children[seg]
+        for _, child in pairs(node.children or {}) do
             local is_folder = node_has_children(child)
 
             results[#results + 1] = {
                 kind = is_folder and "folder" or "file",
-                name = seg,
+                name = child.seg,
                 node = child,
                 path = child.file,
                 full = child.full,
