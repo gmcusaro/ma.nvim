@@ -19,19 +19,28 @@ M._config = {
     vaults = {
         -- If nil or {}, it uses the current working directory as the root. By default the "active" vault is the first.
     },
-    respect_gitignore = true,
-    autochdir = "lcd",
-    depth = nil,
-    delete_to_trash = true,
-    picker_actions = {
-        { "c", "create" },
-        { "r", "rename" },
-        { "d", "delete" },
+    root = {
+        autochdir = "lcd",
+        open_from = "root",
     },
-    date_format_frontmatter = "%Y %b %d - %H:%M:%S",
-    telescope = {},
-    columns = { "git", "icons" },
-    sort = { by = "name", order = "asc" },
+    scan = {
+        respect_gitignore = true,
+        depth = nil,
+    },
+    picker = {
+        actions = {
+            { "c", "create" },
+            { "r", "rename" },
+            { "d", "delete" },
+        },
+        telescope = {},
+        columns = { "git", "icons" },
+        sort = { by = "name", order = "asc" },
+    },
+    notes = {
+        delete_to_trash = true,
+        date_format_frontmatter = "%Y %b %d - %H:%M:%S",
+    },
     daily_notes = {
         date_format = nil, -- default "%Y.%b-%d"
         locale = nil, -- default current locale
@@ -242,7 +251,8 @@ local function active_root()
 end
 
 local function maybe_chdir_to_active_root()
-    local mode = M._config.autochdir
+    local root_cfg = M._config.root or {}
+    local mode = root_cfg.autochdir
     if not mode or mode == false then return end
 
     local root = active_root()
@@ -334,7 +344,8 @@ local function frontmatter_text(note_full, title, desc)
     local d = desc or ""
     local id = nanoid_like(23)
 
-    local stamp = format_stamp(M._config.date_format_frontmatter, nil)
+    local notes_cfg = M._config.notes or {}
+    local stamp = format_stamp(notes_cfg.date_format_frontmatter, nil)
 
     return table.concat({
         "---",
@@ -643,7 +654,8 @@ local function scan_notes_tree(cfg)
     local cwd = normpath(cfg.cwd) or normpath(vim.fn.getcwd())
     local respect_gitignore = (cfg.respect_gitignore ~= false)
 
-    local colspec = normalize_columns(cfg.columns or M._config.columns or {})
+    local picker_cfg = M._config.picker or {}
+    local colspec = normalize_columns(cfg.columns or picker_cfg.columns or {})
     local need_git = false
     for _, c in ipairs(colspec.cols) do
         if c == "git" then need_git = true break end
@@ -659,7 +671,7 @@ local function scan_notes_tree(cfg)
         search_pattern = is_note_file,
     })
 
-    local sort = cfg.sort or M._config.sort or {}
+    local sort = cfg.sort or picker_cfg.sort or {}
     local by = sort.by or "name"
     local need_times = (by == "update" or by == "creation")
 
@@ -707,7 +719,8 @@ local function update_frontmatter_updated(bufnr)
     end
     if not updated_idx then return end
 
-    local stamp = format_stamp(M._config.date_format_frontmatter, nil)
+    local notes_cfg = M._config.notes or {}
+    local stamp = format_stamp(notes_cfg.date_format_frontmatter, nil)
     vim.api.nvim_buf_set_lines(bufnr, updated_idx - 1, updated_idx, false, {
         ("updated: %s"):format(stamp),
     })
@@ -1031,6 +1044,33 @@ local function current_note_path_if_managed()
     return normpath(file) or file
 end
 
+local function current_level_stack(cwd)
+    local file = vim.api.nvim_buf_get_name(0)
+    if file ~= "" and is_under(file, cwd) then
+        local base = normpath(file) or file
+        local rel = relative_to_root(base, cwd)
+
+        if is_note_file(base) then
+            rel = rel:gsub("%.[^.]+$", "")
+        else
+            rel = relative_to_root(vim.fn.fnamemodify(base, ":h"), cwd)
+        end
+
+        local stack = split_dots(rel:gsub("/", "."))
+        if is_note_file(base) and #stack > 0 then
+            table.remove(stack, #stack)
+        end
+        return stack
+    end
+
+    local win_cwd = normpath(vim.fn.getcwd())
+    if win_cwd and win_cwd ~= cwd and is_under(win_cwd, cwd) then
+        return split_dots(relative_to_root(win_cwd, cwd):gsub("/", "."))
+    end
+
+    return {}
+end
+
 --==============================================================
 -- Link from visual selection: :Ma link
 --==============================================================
@@ -1135,11 +1175,13 @@ local actions = {}
 
 local function delete_one(path)
     if not path or path == "" then return false end
-    return (M._config.delete_to_trash and trash_file(path)) or rm_file(path)
+    local notes_cfg = M._config.notes or {}
+    return (notes_cfg.delete_to_trash and trash_file(path)) or rm_file(path)
 end
 
 local function delete_verb()
-    return (M._config.delete_to_trash and "trashed") or "deleted"
+    local notes_cfg = M._config.notes or {}
+    return (notes_cfg.delete_to_trash and "trashed") or "deleted"
 end
 
 local function collect_note_files(node)
@@ -1440,7 +1482,8 @@ local function compact(tbl)
 end
 
 local function telescope_opts()
-    local t = M._config.telescope
+    local picker_cfg = M._config.picker or {}
+    local t = picker_cfg.telescope
     if not is_nonempty_table(t) then return nil end
 
     -- validate initial_mode if present
@@ -1534,12 +1577,13 @@ local function navigator(cfg)
 
     local devicons = safe_require("nvim-web-devicons")
 
-    local colspec = normalize_columns(cfg.columns or M._config.columns or {})
+    local picker_cfg = M._config.picker or {}
+    local colspec = normalize_columns(cfg.columns or picker_cfg.columns or {})
     local columns = colspec.cols
     local git_symbols = colspec.git_override or DEFAULT_GIT_SYMBOLS
     local git_override = colspec.git_override
 
-    local stack = {}
+    local stack = vim.deepcopy(cfg.start_stack or {})
     local cwd, root = scan_notes_tree(cfg)
     if not root then return end
 
@@ -1564,29 +1608,22 @@ local function navigator(cfg)
     end
 
     local function picker_actions_list()
-        local pa = M._config.picker_actions
+        local pa = picker_cfg.actions
         if pa == false then return {} end
         if type(pa) ~= "table" then return {} end
 
         local out = {}
-        if is_list(pa) then
-            -- ordered: { {"c","create"}, {"r","rename"} }
-            for _, it in ipairs(pa) do
-                local k, act = it[1], it[2]
-                if type(k) == "string" and #k == 1 and type(act) == "string" and act ~= "" then
-                    out[#out + 1] = { k = k, act = act }
-                end
-            end
+        if not is_list(pa) then
             return out
         end
 
-        -- legacy map form: stable order by key
-        for k, act in pairs(pa) do
+        -- ordered: { {"c","create"}, {"r","rename"} }
+        for _, it in ipairs(pa) do
+            local k, act = it[1], it[2]
             if type(k) == "string" and #k == 1 and type(act) == "string" and act ~= "" then
                 out[#out + 1] = { k = k, act = act }
             end
         end
-        table.sort(out, function(a, b) return a.k < b.k end)
         return out
     end
 
@@ -1684,7 +1721,7 @@ local function navigator(cfg)
             }
         end
 
-        local s = cfg.sort or M._config.sort or {}
+        local s = cfg.sort or picker_cfg.sort or {}
         local by = s.by or "name"
         local desc = (s.order == "desc")
 
@@ -1890,17 +1927,26 @@ end
 --==============================================================
 function M._runtime_cfg()
     local cfg = M._config
+    local scan_cfg = cfg.scan or {}
+    local picker_cfg = cfg.picker or {}
+    local root_cfg = cfg.root or {}
     return {
         cwd = active_root(),
-        respect_gitignore = cfg.respect_gitignore,
-        depth = cfg.depth,
-        columns = cfg.columns,
+        respect_gitignore = (scan_cfg.respect_gitignore ~= false),
+        depth = scan_cfg.depth,
+        columns = picker_cfg.columns,
+        sort = picker_cfg.sort,
+        open_from = (root_cfg.open_from == "current") and "current" or "root",
     }
 end
 
 function M.navigate()
+    local cfg = M._runtime_cfg()
+    if cfg.open_from == "current" then
+        cfg.start_stack = current_level_stack(cfg.cwd)
+    end
     maybe_chdir_to_active_root()
-    navigator(M._runtime_cfg())
+    navigator(cfg)
 end
 
 function M.link()
@@ -1977,26 +2023,20 @@ M.setup = function(user_opts)
     user_opts = user_opts or {}
     local incoming = vim.deepcopy(user_opts)
 
-    if type(incoming.keymaps) == "table" then
-        local looks_like_actions = false
-        for k, v in pairs(incoming.keymaps) do
-            if type(k) == "string" and #k == 1 and (type(v) == "string" or type(v) == "table") then
-                looks_like_actions = true
-                break
-            end
-        end
-        if looks_like_actions and incoming.picker_actions == nil then
-            incoming.picker_actions = incoming.keymaps
-        end
-        incoming.keymaps = nil
+    if incoming.root ~= nil and type(incoming.root) ~= "table" then
+        incoming.root = nil
     end
-
-    if type(incoming.picker_actions) == "table" then
-        for k, v in pairs(incoming.picker_actions) do
-            if type(k) == "string" and #k == 1 and type(v) == "table" then
-                incoming.picker_actions[k] = v[1]
-            end
-        end
+    if incoming.scan ~= nil and type(incoming.scan) ~= "table" then
+        incoming.scan = nil
+    end
+    if incoming.picker ~= nil and type(incoming.picker) ~= "table" then
+        incoming.picker = nil
+    end
+    if incoming.notes ~= nil and type(incoming.notes) ~= "table" then
+        incoming.notes = nil
+    end
+    if incoming.daily_notes ~= nil and incoming.daily_notes ~= false and type(incoming.daily_notes) ~= "table" then
+        incoming.daily_notes = nil
     end
 
     M._config = vim.tbl_deep_extend("force", M._config, incoming)

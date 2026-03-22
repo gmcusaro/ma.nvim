@@ -89,23 +89,32 @@ require("ma").setup({
   vaults = {
       -- your vaults
   },
-  respect_gitignore = true,
-  autochdir = "lcd",
-  depth = nil,
-  delete_to_trash = true,
-  picker_actions = {
-    { "c", "create" },
-    { "r", "rename" },
-    { "d", "delete" },
+  root = {
+    autochdir = "lcd",
+    open_from = "root",
   },
-  date_format_frontmatter = "%Y %b %d - %H:%M:%S",
-  telescope = {},
-  columns = { "git", "icons" },
-  sort = { by = "name", order = "asc" },
+  scan = {
+    respect_gitignore = true,
+    depth = nil,
+  },
+  picker = {
+    actions = {
+      { "c", "create" },
+      { "r", "rename" },
+      { "d", "delete" },
+    },
+    telescope = {},
+    columns = { "git", "icons" },
+    sort = { by = "name", order = "asc" },
+  },
+  notes = {
+    delete_to_trash = true,
+    date_format_frontmatter = "%Y %b %d - %H:%M:%S",
+  },
   daily_notes = {
     date_format = nil,
     locale = nil,
-  }
+  },
 })
 ```
 
@@ -152,7 +161,7 @@ Use when:
 
 Create or open the daily note. Use it to keep daily journal/log notes.
 
-Builds `daily.<formatted-date>.md` using [`daily_notes`](#daily_notes) options.
+Builds `daily.<formatted-date>.md` using `daily_notes` options.
 
 ### `:Ma rename`
 
@@ -182,7 +191,7 @@ Example:
 Delete the current note with confirmation.
 Works only for managed markdown notes under the active root.
 In the navigator picker, multi-select deletion is supported via Telescope multi-select.
-Uses trash-first or hard-delete mode (see [`delete_to_trash`](#delete_to_trash)).
+Uses trash-first or hard-delete mode (see `notes.delete_to_trash`).
 
 ### `:Ma link`
 
@@ -202,7 +211,7 @@ Use when:
 - `Backspace` (normal mode): go up when prompt is empty.
 - `-` (normal mode): force go up.
 - `Ctrl-h` (insert mode): force go up.
-- Action keys come from [`picker_actions`](#picker_actions) in normal mode.
+- Action keys come from `picker.actions` in normal mode.
 - Multi-select + delete is supported in the picker delete action.
 
 ## Configuration Reference
@@ -239,26 +248,7 @@ Important:
 Use when:
 - You want explicit, switchable note roots.
 
-### `respect_gitignore`
-
-Control whether scans exclude files ignored by `.gitignore`.
-
-Type:
-- `boolean`
-
-Default:
-- `true`
-
-Example:
-
-```lua
-respect_gitignore = false
-```
-
-Use when:
-- Set to `false` only if you intentionally want ignored markdown files included.
-
-### `autochdir`
+### `root.autochdir`
 
 Control whether Ma changes Neovim's working directory to the active root before major actions.
 
@@ -277,7 +267,9 @@ Behavior:
 Example:
 
 ```lua
-autochdir = "tcd"
+root = {
+  autochdir = "tcd",
+}
 ```
 
 Important:
@@ -286,7 +278,53 @@ Important:
 Use when:
 - You want Ma's root and your relative-path tools to stay aligned.
 
-### `depth`
+### `root.open_from`
+
+Control where the navigator opens inside the active root.
+
+Type:
+- `"root" | "current"`
+
+Default:
+- `"root"`
+
+Behavior:
+- `"root"`: always open the navigator at the active root.
+- `"current"`: open the navigator at the current managed note level, or the current cwd level when it is inside the active root.
+
+Example:
+
+```lua
+root = {
+  open_from = "current",
+}
+```
+
+Use when:
+- You want `:Ma` to reopen where you already are working instead of always jumping back to the root.
+
+### `scan.respect_gitignore`
+
+Control whether scans exclude files ignored by `.gitignore`.
+
+Type:
+- `boolean`
+
+Default:
+- `true`
+
+Example:
+
+```lua
+scan = {
+  respect_gitignore = false,
+}
+```
+
+Use when:
+- Set to `false` only if you intentionally want ignored markdown files included.
+
+### `scan.depth`
 
 Maximum directory recursion depth during note scanning.
 
@@ -303,13 +341,15 @@ Behavior:
 Example:
 
 ```lua
-depth = 3
+scan = {
+  depth = 3,
+}
 ```
 
 Use when:
 - Your vault is large and you want faster scans.
 
-### `delete_to_trash`
+### `notes.delete_to_trash`
 
 Choose trash-first deletion or direct deletion.
 
@@ -325,7 +365,9 @@ Behavior:
 Example:
 
 ```lua
-delete_to_trash = true
+notes = {
+  delete_to_trash = true,
+}
 ```
 
 Important:
@@ -334,12 +376,12 @@ Important:
 Use when:
 - You want safer delete operations.
 
-### `picker_actions`
+### `picker.actions`
 
 Keybindings available inside the navigator picker.
 
 Type:
-- `{ { string, "create"|"rename"|"delete" } } | { [string]: "create"|"rename"|"delete" } | false`
+- `{ { string, "create"|"rename"|"delete" } } | false`
 
 Default:
 
@@ -354,21 +396,22 @@ Default:
 Behavior:
 - `false` disables picker actions.
 - List order is preserved.
-- Legacy map forms are still accepted.
 
 Example:
 
 ```lua
-picker_actions = {
-  { "n", "create" },
-  { "x", "delete" },
+picker = {
+  actions = {
+    { "n", "create" },
+    { "x", "delete" },
+  },
 }
 ```
 
 Use when:
 - You want custom action keys in Telescope.
 
-### `date_format_frontmatter`
+### `notes.date_format_frontmatter`
 
 Date format for `created` and `updated` frontmatter fields.
 
@@ -387,7 +430,9 @@ Behavior:
 Example:
 
 ```lua
-date_format_frontmatter = "%Y-%m-%d %H:%M"
+notes = {
+  date_format_frontmatter = "%Y-%m-%d %H:%M",
+}
 ```
 
 Important:
@@ -396,7 +441,7 @@ Important:
 Use when:
 - You need a specific timestamp style across notes.
 
-### `telescope`
+### `picker.telescope`
 
 Override Telescope picker options specifically for Ma.
 
@@ -416,17 +461,19 @@ Supported options are documented in the [Telescope README](https://github.com/nv
 Example:
 
 ```lua
-telescope = {
-  prompt_prefix = " ",
-  selection_caret = "| ",
-  initial_mode = "normal",
-  layout_config = {
-    prompt_position = "top",
-    width = 0.9,
-    height = 0.9,
-    preview_width = 0.6,
-    mirror = false,
-    preview_cutoff = 120,
+picker = {
+  telescope = {
+    prompt_prefix = " ",
+    selection_caret = "| ",
+    initial_mode = "normal",
+    layout_config = {
+      prompt_position = "top",
+      width = 0.9,
+      height = 0.9,
+      preview_width = 0.6,
+      mirror = false,
+      preview_cutoff = 120,
+    },
   },
 }
 ```
@@ -434,7 +481,7 @@ telescope = {
 Use when:
 - You want Ma pickers to match your Telescope UX.
 
-### `columns`
+### `picker.columns`
 
 Choose which navigator columns are shown and in what order.
 
@@ -455,7 +502,7 @@ Behavior:
 Use when:
 - You want simpler or more informative picker rows.
 
-#### `columns.git`
+#### `picker.columns.git`
 
 Nested key inside `columns` used to override Git status symbols for the `git` column.
 
@@ -489,17 +536,19 @@ Behavior:
 Example:
 
 ```lua
-columns = {
-  git = {
-    modified = "✱ ",
-    untracked = "… ",
-    conflicted = "‼ ",
+picker = {
+  columns = {
+    git = {
+      modified = "✱ ",
+      untracked = "… ",
+      conflicted = "‼ ",
+    },
+    "icons",
   },
-  "icons",
 }
 ```
 
-#### `columns.icons`
+#### `picker.columns.icons`
 
 Nested key inside `columns` used to customize folder/file icons in the `icons` column.
 
@@ -516,14 +565,16 @@ Examples:
 
 ```lua
 -- default
-columns = { "git", "icons" }
+picker = { columns = { "git", "icons" } }
 
 -- custom fixed icons (dependency optional)
-columns = {
-  "git",
-  icons = {
-    folder = "F ",
-    file = "md",
+picker = {
+  columns = {
+    "git",
+    icons = {
+      folder = "F ",
+      file = "md",
+    },
   },
 }
 ```
@@ -531,7 +582,7 @@ columns = {
 Use when:
 - You want explicit icon behavior with or without `nvim-web-devicons`.
 
-### `sort`
+### `picker.sort`
 
 Sort strategy for entries in each picker level.
 
@@ -553,7 +604,9 @@ Behavior:
 Example:
 
 ```lua
-sort = { by = "update", order = "desc" }
+picker = {
+  sort = { by = "update", order = "desc" },
+}
 ```
 
 Use when:
@@ -654,7 +707,7 @@ created: <formatted timestamp>
 
 Behavior:
 - Frontmatter is written only when a note file is newly created; opening an existing note does not insert or rewrite frontmatter.
-- `created` and `updated` use [`date_format_frontmatter`](#date_format_frontmatter).
+- `created` and `updated` use `notes.date_format_frontmatter`.
 - `updated` is refreshed on `BufWritePre` for managed markdown files under the active root.
 - `updated` is only modified if frontmatter exists and contains an `updated:` field.
 - Notes without frontmatter are left untouched.

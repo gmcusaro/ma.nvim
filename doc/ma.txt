@@ -17,16 +17,17 @@ CONTENTS                                                     *ma-contents*
 5. Picker Behavior .................................. |ma-picker-behavior|
 6. Configuration Reference........................... |ma-configuration-reference|
    6.1 vaults ....................................... |ma-option-vaults|
-   6.2 respect_gitignore ............................ |ma-option-respect-gitignore|
-   6.3 autochdir .................................... |ma-option-autochdir|
-   6.4 depth ........................................ |ma-option-depth|
-   6.5 delete_to_trash .............................. |ma-option-delete-to-trash|
-   6.6 picker_actions ............................... |ma-option-picker-actions|
-   6.7 date_format_frontmatter ...................... |ma-option-date-format-frontmatter|
-   6.8 telescope .................................... |ma-option-telescope|
-   6.9 columns ...................................... |ma-option-columns|
-   6.10 sort ........................................ |ma-option-sort|
-   6.11 daily_notes ................................. |ma-option-daily-notes|
+   6.2 root.autochdir ............................... |ma-option-root-autochdir|
+   6.3 root.open_from ............................... |ma-option-root-open-from|
+   6.4 scan.respect_gitignore ....................... |ma-option-scan-respect-gitignore|
+   6.5 scan.depth ................................... |ma-option-scan-depth|
+   6.6 notes.delete_to_trash ........................ |ma-option-notes-delete-to-trash|
+   6.7 picker.actions ............................... |ma-option-picker-actions|
+   6.8 notes.date_format_frontmatter ................ |ma-option-notes-date-format-frontmatter|
+   6.9 picker.telescope ............................. |ma-option-picker-telescope|
+   6.10 picker.columns .............................. |ma-option-picker-columns|
+   6.11 picker.sort ................................. |ma-option-picker-sort|
+   6.12 daily_notes ................................. |ma-option-daily-notes|
 7. Frontmatter ...................................... |ma-frontmatter|
 
 ==============================================================================
@@ -88,19 +89,28 @@ files).
     vaults = {
       { name = "My Brain", path = "~/notes" },
     },
-    respect_gitignore = true,
-    autochdir = "lcd",
-    depth = nil,
-    delete_to_trash = true,
-    picker_actions = {
-      { "c", "create" },
-      { "r", "rename" },
-      { "d", "delete" },
+    root = {
+      autochdir = "lcd",
+      open_from = "root",
     },
-    date_format_frontmatter = "%Y %b %d - %H:%M:%S",
-    telescope = {},
-    columns = { "git", "icons" },
-    sort = { by = "name", order = "asc" },
+    scan = {
+      respect_gitignore = true,
+      depth = nil,
+    },
+    picker = {
+      actions = {
+        { "c", "create" },
+        { "r", "rename" },
+        { "d", "delete" },
+      },
+      telescope = {},
+      columns = { "git", "icons" },
+      sort = { by = "name", order = "asc" },
+    },
+    notes = {
+      delete_to_trash = true,
+      date_format_frontmatter = "%Y %b %d - %H:%M:%S",
+    },
     daily_notes = {
       date_format = nil,
       locale = nil,
@@ -160,7 +170,7 @@ files).
     Works only for managed markdown notes under the active root.
     In the navigator picker, multi-select deletion is supported via
     Telescope multi-select.
-    Uses trash-first or hard-delete behavior based on `delete_to_trash`.
+    Uses trash-first or hard-delete behavior based on `notes.delete_to_trash`.
 
 :Ma link                                                        *:Ma-link*
     Visual-mode command. Replaces current visual selection with a markdown
@@ -177,7 +187,7 @@ In the navigator picker:
 - <BS> (normal)  go up when prompt is empty
 - - (normal)     force go up
 - <C-h> (insert) force go up
-- action keys    from `picker_actions` (normal mode)
+- action keys    from `picker.actions` (normal mode)
 - multi-select + delete is supported
 
 ==============================================================================
@@ -197,17 +207,7 @@ Behavior:
   - first valid vault becomes active by default
   - if no valid vault exists, Ma.nvim uses current working directory
 
-6.2 `respect_gitignore`                      *ma-option-respect-gitignore*
-Type: >
-  boolean
-<
-Default: >
-  true
-<
-Behavior:
-  Control whether scans exclude files ignored by `.gitignore`.
-
-6.3 `autochdir`                                      *ma-option-autochdir*
+6.2 `root.autochdir`                         *ma-option-root-autochdir*
 Type: >
   false | "lcd" | "tcd" | "cd"
 <
@@ -224,7 +224,29 @@ Control whether Ma changes Neovim's working directory to the active root
 before major actions.
 Applied before navigation, linking, creating, and daily note operations.
 
-6.4 `depth`                                            *ma-option-depth*
+6.3 `root.open_from`                        *ma-option-root-open-from*
+Type: >
+  "root" | "current"
+<
+Default: >
+  "root"
+<
+Behavior:
+  - "root": open the navigator at the active root
+  - "current": open at the current managed note level, or the current cwd
+    level when it is inside the active root
+
+6.4 `scan.respect_gitignore`      *ma-option-scan-respect-gitignore*
+Type: >
+  boolean
+<
+Default: >
+  true
+<
+Behavior:
+  Control whether scans exclude files ignored by `.gitignore`.
+
+6.5 `scan.depth`                                *ma-option-scan-depth*
 Type: >
   integer | nil
 <
@@ -237,7 +259,7 @@ Behavior:
 
 Use when the vault is large and you want faster scans.
 
-6.5 `delete_to_trash`                           *ma-option-delete-to-trash*
+6.6 `notes.delete_to_trash`            *ma-option-notes-delete-to-trash*
 Type: >
   boolean
 <
@@ -248,10 +270,9 @@ Behavior:
   When true, Ma tries OS trash tools first (`osascript` on macOS, `gio`,
   `trash-put`, `kioclient5`) and falls back to file removal.
 
-6.6 `picker_actions`                              *ma-option-picker-actions*
+6.7 `picker.actions`                        *ma-option-picker-actions*
 Type: >
-  { { string, "create"|"rename"|"delete" } } |
-  { [string]: "create"|"rename"|"delete" } | false
+  { { string, "create"|"rename"|"delete" } } | false
 <
 Default: >
   {
@@ -263,21 +284,23 @@ Default: >
 Behavior:
   - `false` disables picker actions
   - list order is preserved
-  - legacy map forms are accepted
 
 Example:
 
 ```lua
-picker_actions = {
-  { "n", "create" },
-  { "x", "delete" },
+picker = {
+  actions = {
+    { "n", "create" },
+    { "x", "delete" },
+  },
 }
 ```
 
 Use when:
 - You want custom action keys in Telescope.
 
-6.7 `date_format_frontmatter`        *ma-option-date-format-frontmatter*
+6.8 `notes.date_format_frontmatter`
+                                  *ma-option-notes-date-format-frontmatter*
 Type: >
   string
 <
@@ -293,10 +316,12 @@ Behavior:
 Example:
 
 ```lua
-date_format_frontmatter = "%Y-%m-%d %H:%M"
+notes = {
+  date_format_frontmatter = "%Y-%m-%d %H:%M",
+}
 ```
 
-6.8 `telescope`                                    *ma-option-telescope*
+6.9 `picker.telescope`                 *ma-option-picker-telescope*
 Type: >
   table
 <
@@ -309,7 +334,7 @@ Behavior:
   `initial_mode` accepts only `"insert"` or `"normal"`.
   Other Telescope keys are ignored by Ma.nvim.
 
-6.9 `columns`                                        *ma-option-columns*
+6.10 `picker.columns`                    *ma-option-picker-columns*
 Type: >
   table
 <
@@ -321,7 +346,7 @@ Behavior:
   - order controls display order
   - if `git` column is disabled, git status is not computed
 
-`columns.git`                                      *ma-option-columns-git*
+`picker.columns.git`                      *ma-option-picker-columns-git*
 Type: >
   table
 <
@@ -342,7 +367,7 @@ Built-in statuses:
   - conflicted
   - unknown
 
-`columns.icons`                                  *ma-option-columns-icons*
+`picker.columns.icons`                  *ma-option-picker-columns-icons*
 Type: >
   { folder?: string, file?: string }
 <
@@ -353,7 +378,7 @@ Behavior:
   - without a custom `file` icon, Ma uses `nvim-web-devicons` when
     available, else fallback `󰈙`
 
-6.10 `sort`                                           *ma-option-sort*
+6.11 `picker.sort`                          *ma-option-picker-sort*
 Type: >
   { by?: "name"|"update"|"creation", order?: "asc"|"desc" }
 <
@@ -366,7 +391,7 @@ Behavior:
   - `creation`: birthtime/ctime fallback
   - ties fall back to full note path for deterministic order
 
-6.11 `daily_notes`                                *ma-option-daily-notes*
+6.12 `daily_notes`                                *ma-option-daily-notes*
 Type: >
   table | false
 <
@@ -415,7 +440,7 @@ When creating notes via `:Ma create` or `:Ma daily`, Ma.nvim writes:
 Behavior:
   - frontmatter is written only when a note file is newly created;
     opening an existing note does not insert or rewrite frontmatter
-  - `created` and `updated` use `date_format_frontmatter`
+  - `created` and `updated` use `notes.date_format_frontmatter`
   - on `BufWritePre`, Ma.nvim refreshes `updated` for managed markdown files
     under active root
   - files without frontmatter are not modified
