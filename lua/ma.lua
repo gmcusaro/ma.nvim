@@ -44,7 +44,10 @@ M._config = {
     daily_notes = {
         date_format = nil, -- default "%Y.%b-%d"
         locale = nil, -- default current locale
-    }
+    },
+    ui = {
+        prompt_backend = "cmdline", -- "cmdline" (vim.fn.input) or "ui" (vim.ui.input)
+    },
 }
 
 --==============================================================
@@ -187,6 +190,8 @@ local vault_cache = {
     by_name_lc = {},
 }
 
+local active_vault = nil
+
 local function build_vault_name_index(vaults)
     local by_name, by_name_lc = {}, {}
     for _, v in ipairs(vaults or {}) do
@@ -208,11 +213,8 @@ local function refresh_vault_cache(force)
 
     local vaults = normalize_vaults(src)
     local by_name, by_name_lc = build_vault_name_index(vaults)
-    if vaults then
-        M._config.vaults = vaults
-    end
 
-    vault_cache.source = M._config.vaults
+    vault_cache.source = src
     vault_cache.list = vaults
     vault_cache.by_name = by_name
     vault_cache.by_name_lc = by_name_lc
@@ -220,12 +222,8 @@ local function refresh_vault_cache(force)
     return vault_cache.list
 end
 
-local function configured_vaults()
-    return refresh_vault_cache(false)
-end
-
 local function configured_vaults_or_warn()
-    local vaults = configured_vaults()
+    local vaults = refresh_vault_cache(false)
     if vaults then return vaults end
     vim.notify("[Ma.nvim] no vaults configured", vim.log.levels.WARN)
     return nil
@@ -240,12 +238,12 @@ end
 
 local function activate_vault(vault)
     if not vault then return end
-    M._config._active_vault = vault
+    active_vault = vault
     vim.schedule(function() M.navigate() end)
 end
 
 local function active_root()
-    local v = M._config._active_vault
+    local v = active_vault
     if v and v.path and v.path ~= "" then return v.path end
     return normpath(vim.fn.getcwd())
 end
@@ -769,19 +767,23 @@ local function prompt_ync(message)
     return nil
 end
 
-local function ask_cmdline(prompt, default, cb)
-    vim.cmd("redraw")
-    local s = vim.fn.input(prompt, default or "")
-    cb(s)
-end
-
-local function ask_ui(prompt, default, cb)
-    vim.ui.input({ prompt = prompt, default = default or "" }, cb)
+local function ask(prompt, default, cb)
+    local backend = (M._config.ui or {}).prompt_backend
+    if backend == "ui" then
+        vim.ui.input({ prompt = prompt, default = default or "" }, cb)
+    else
+        vim.cmd("redraw")
+        local s = vim.fn.input(prompt, default or "")
+        cb(s)
+    end
 end
 
 --==============================================================
 -- Batch rename safety + mechanics
 --==============================================================
+--- Validates that all rename targets are unique and don't collide with
+--- existing files. Returns (true) on success, or (false, error_message)
+--- when a duplicate target or existing-file collision is found.
 local function ensure_unique_targets(pairs)
     local seen = {}
     for _, it in ipairs(pairs or {}) do
@@ -839,7 +841,7 @@ local function default_from_prefix(prefix_hint)
     return (prefix_hint:sub(-1) == ".") and prefix_hint or (prefix_hint .. ".")
 end
 
-local function prompt_note_full(ask, default, cb)
+local function prompt_note_full(default, cb)
     ask("New note ('.' for levels, '-' for names): ", default or "", function(input)
         local raw = input or ""
         local trimmed = trim(raw)
@@ -858,7 +860,7 @@ local function prompt_note_full(ask, default, cb)
     end)
 end
 
-local function prompt_title(ask, note_full, cb)
+local function prompt_title(note_full, cb)
     local suggested = title_from_note_name(note_full)
     ask("Title (optional): ", suggested, function(title)
         title = trim(title)
@@ -866,7 +868,7 @@ local function prompt_title(ask, note_full, cb)
     end)
 end
 
-local function prompt_desc(ask, cb)
+local function prompt_desc(cb)
     ask("Desc (optional): ", "", function(desc)
         cb(desc or "")
     end)
@@ -879,14 +881,14 @@ end
 --==============================================================
 -- Create / Open separation (small, focused functions)
 --==============================================================
-local function prompt_title_desc(opts, ask, note_full, cb)
+local function prompt_title_desc(opts, note_full, cb)
     opts = opts or {}
 
     local function with_desc(title)
         if opts.ask_desc == false then
             return cb(title, "")
         end
-        prompt_desc(ask, function(desc)
+        prompt_desc(function(desc)
             cb(title, desc or "")
         end)
     end
@@ -895,7 +897,7 @@ local function prompt_title_desc(opts, ask, note_full, cb)
         return with_desc(opts.title)
     end
 
-    prompt_title(ask, note_full, function(title)
+    prompt_title(note_full, function(title)
         with_desc(title)
     end)
 end
@@ -925,7 +927,7 @@ local function open_existing_note(cwd, note_full)
     return false, path
 end
 
-local function open_or_create_note(opts, cwd, ask, done)
+local function open_or_create_note(opts, cwd, done)
     opts = opts or {}
 
     local function finish_open(note_full)
@@ -939,7 +941,7 @@ local function open_or_create_note(opts, cwd, ask, done)
     end
 
     local function create_then_open(note_full)
-        prompt_title_desc(opts, ask, note_full, function(title, desc)
+        prompt_title_desc(opts, note_full, function(title, desc)
             local created, path = create_note_file(cwd, note_full, title, desc, { refuse_overwrite = true })
             local opened, _ = open_existing_note(cwd, note_full)
             return done({
@@ -971,14 +973,14 @@ local function open_or_create_note(opts, cwd, ask, done)
     end
 
     local default = default_from_prefix(opts.prefix_hint)
-    prompt_note_full(ask, default, function(note_full)
+    prompt_note_full(default, function(note_full)
         decide(note_full)
     end)
 end
 
-local function create_note_flexible(cwd, prefix_hint, ask, done)
+local function create_note_flexible(cwd, prefix_hint, done)
     maybe_chdir_to_active_root()
-    open_or_create_note({ prefix_hint = prefix_hint, ask_desc = true }, cwd, ask, function(res)
+    open_or_create_note({ prefix_hint = prefix_hint, ask_desc = true }, cwd, function(res)
         done(res and res.created or false)
     end)
 end
@@ -1002,7 +1004,7 @@ local function daily_note_full_and_stamp()
     return "daily." .. stamp, stamp
 end
 
-local function open_or_create_daily(cwd, ask, done)
+local function open_or_create_daily(cwd, done)
     maybe_chdir_to_active_root()
     local note_full, stamp = daily_note_full_and_stamp()
     if not note_full then
@@ -1014,7 +1016,7 @@ local function open_or_create_daily(cwd, ask, done)
         note_full = note_full,
         title = stamp,
         ask_desc = true,
-    }, cwd, ask, function(res)
+    }, cwd, function(res)
         done(res and res.created or false)
     end)
 end
@@ -1146,7 +1148,7 @@ local function ma_link_from_visual()
     local erow0, ecol0_excl = sel.erow0, sel.ecol0_excl
 
     -- Reuse your existing prompt + normalization rules
-    prompt_note_full(ask_cmdline, default_full, function(note_full)
+    prompt_note_full(default_full, function(note_full)
         if not note_full then return end
         note_full = normalize_note_full(trim(note_full)):lower()
         if note_full == "" then return end
@@ -1154,7 +1156,7 @@ local function ma_link_from_visual()
         open_or_create_note({
             note_full = note_full,
             ask_desc = true,
-        }, cwd, ask_cmdline, function(res)
+        }, cwd, function(res)
             if not res or not res.opened then return end
 
             local target = note_full .. ".md"
@@ -1434,11 +1436,11 @@ local function safe_previewer(t)
                     if self.state._ma_last_ft ~= ft then
                         self.state._ma_last_ft = ft
                         vim.api.nvim_buf_call(bufnr, function()
-                            pcall(vim.api.nvim_buf_set_option, bufnr, "filetype", ft)
+                            pcall(vim.api.nvim_set_option_value, "filetype", ft, { buf = bufnr })
                             if utils and utils.highlighter then
                                 pcall(utils.highlighter, bufnr, ft)
                             else
-                                pcall(vim.api.nvim_buf_set_option, bufnr, "syntax", ft)
+                                pcall(vim.api.nvim_set_option_value, "syntax", ft, { buf = bufnr })
                             end
                         end)
                     end
@@ -1468,23 +1470,10 @@ local function safe_previewer(t)
     return nil
 end
 
-local function is_nonempty_table(t)
-    return type(t) == "table" and next(t) ~= nil
-end
-
-local function compact(tbl)
-    if type(tbl) ~= "table" then return nil end
-    local out = {}
-    for k, v in pairs(tbl) do
-        if v ~= nil then out[k] = v end
-    end
-    return next(out) and out or nil
-end
-
 local function telescope_opts()
     local picker_cfg = M._config.picker or {}
     local t = picker_cfg.telescope
-    if not is_nonempty_table(t) then return nil end
+    if not (type(t) == "table" and next(t) ~= nil) then return nil end
 
     -- validate initial_mode if present
     local initial_mode = nil
@@ -1493,15 +1482,22 @@ local function telescope_opts()
     end
 
     -- layout_config: pass only if user provided something
-    local layout_config = is_nonempty_table(t.layout_config) and compact(t.layout_config) or nil
+    local layout_config
+    if type(t.layout_config) == "table" then
+        local lc = {}
+        for k, v in pairs(t.layout_config) do
+            if v ~= nil then lc[k] = v end
+        end
+        layout_config = next(lc) and lc or nil
+    end
 
     -- build final opts: only include user-set keys (no defaults injected here)
-    return compact({
-        prompt_prefix = t.prompt_prefix,
-        selection_caret = t.selection_caret,
-        initial_mode = initial_mode,
-        layout_config = layout_config,
-    })
+    local opts = {}
+    if t.prompt_prefix ~= nil then opts.prompt_prefix = t.prompt_prefix end
+    if t.selection_caret ~= nil then opts.selection_caret = t.selection_caret end
+    if initial_mode ~= nil then opts.initial_mode = initial_mode end
+    if layout_config ~= nil then opts.layout_config = layout_config end
+    return next(opts) and opts or nil
 end
 
 local function pick_vault()
@@ -1558,16 +1554,6 @@ end
 --==============================================================
 -- Sorting (multi-key + fallback)
 --==============================================================
-local function is_list(t)
-    if type(t) ~= "table" then return false end
-    local n = #t
-    for i = 1, n do
-        if rawget(t, i) == nil then return false end
-    end
-    -- if it has non-array keys too, we still treat it as list for our purposes
-    return true
-end
-
 local function navigator(cfg)
     local t = telescope_deps()
     if not t then
@@ -1599,8 +1585,8 @@ local function navigator(cfg)
     local function title_for()
         local prefix = stack_prefix(stack)
 
-        local v = M._config._active_vault
-        local has_vaults = type(M._config.vaults) == "table" and #M._config.vaults > 0
+        local v = active_vault
+        local has_vaults = type(vault_cache.list) == "table" and #vault_cache.list > 0
         local vault_name = (has_vaults and v and v.name and v.name ~= "") and v.name or nil
 
         local base = vault_name and ("Ma: " .. vault_name) or "Ma"
@@ -1613,7 +1599,7 @@ local function navigator(cfg)
         if type(pa) ~= "table" then return {} end
 
         local out = {}
-        if not is_list(pa) then
+        if not vim.islist(pa) then
             return out
         end
 
@@ -1681,18 +1667,10 @@ local function navigator(cfg)
         return "󰈙"
     end
 
-    local git_for
-    if git_override then
-        git_for = function(v)
-            if v.kind == "back" then return "" end
-            return (git_symbols[v.git or "clean"] or "")
-        end
-    else
-        local unknown = git_symbols.unknown or ""
-        git_for = function(v)
-            if v.kind == "back" then return "" end
-            return (git_symbols[v.git or "clean"] or unknown)
-        end
+    local git_fallback = git_override and "" or (git_symbols.unknown or "")
+    local function git_for(v)
+        if v.kind == "back" then return "" end
+        return (git_symbols[v.git or "clean"] or git_fallback)
     end
 
     local function make_display(v)
@@ -1835,7 +1813,7 @@ local function navigator(cfg)
                     t.actions.close(bufnr)
                     local prefix = stack_prefix(stack)
                     vim.schedule(function()
-                        create_note_flexible(cwd, prefix, ask_ui, done_no_reopen)
+                        create_note_flexible(cwd, prefix, done_no_reopen)
                     end)
                 end
 
@@ -1974,7 +1952,7 @@ local function create_commands()
 
         if sub == "daily" then
             local cwd = active_root()
-            return open_or_create_daily(cwd, ask_cmdline, function() end)
+            return open_or_create_daily(cwd, function() end)
         end
 
         if sub == "link" then
@@ -1984,7 +1962,7 @@ local function create_commands()
         if sub == "create" then
             local cwd = active_root()
             local prefix = note_parent_prefix_from_buf(cwd)
-            return create_note_flexible(cwd, prefix, ask_cmdline, function() end)
+            return create_note_flexible(cwd, prefix, function() end)
         end
 
         if sub == "rename" then
@@ -2003,7 +1981,7 @@ local function create_commands()
         if is_vault_arg then
             local out = {}
             local lead = (arglead or ""):lower()
-            for _, v in ipairs(configured_vaults() or {}) do
+            for _, v in ipairs(refresh_vault_cache(false) or {}) do
                 local name = v.name or ""
                 if name ~= "" and (lead == "" or name:lower():find("^" .. vim.pesc(lead))) then
                     out[#out + 1] = name
@@ -2042,7 +2020,7 @@ M.setup = function(user_opts)
     M._config = vim.tbl_deep_extend("force", M._config, incoming)
 
     local vaults = refresh_vault_cache(true)
-    local active = M._config._active_vault
+    local active = active_vault
     local active_path = active and active.path and normpath(active.path) or nil
     if active_path and vaults then
         local matched = nil
@@ -2052,9 +2030,9 @@ M.setup = function(user_opts)
                 break
             end
         end
-        M._config._active_vault = matched or vaults[1]
+        active_vault = matched or vaults[1]
     elseif not active then
-        M._config._active_vault = (vaults and vaults[1]) or nil
+        active_vault = (vaults and vaults[1]) or nil
     end
 
     create_commands()
