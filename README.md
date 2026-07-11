@@ -90,7 +90,6 @@ require("ma").setup({
       -- your vaults
   },
   root = {
-    autochdir = "lcd",
     open_from = "root",
   },
   scan = {
@@ -250,33 +249,17 @@ Use when:
 
 ### `root.autochdir`
 
-Control whether Ma changes Neovim's working directory to the active root before major actions.
+⚠️ **Deprecated** — no longer has any effect. Kept for backward compatibility only.
 
-Type:
-- `false | "lcd" | "tcd" | "cd"`
+All Ma operations use explicit absolute paths, making directory changes
+unnecessary. Neovim's `lcd`/`tcd`/`cd` all modify `vim.loop.cwd()` (the
+libuv process cwd), which breaks plugins that spawn external processes via
+`uv.spawn()` — notably Telescope's `find_files`.
+See: https://github.com/neovim/neovim/issues/16577
 
-Default:
-- `"lcd"`
-
-Behavior:
-- `false`: no directory change.
-- `"lcd"`: window-local cwd.
-- `"tcd"`: tab-local cwd.
-- `"cd"`: global cwd.
-
-Example:
-
-```lua
-root = {
-  autochdir = "tcd",
-}
-```
-
-Important:
-- Applied when navigating, linking, creating, and opening daily notes.
-
-Use when:
-- You want Ma's root and your relative-path tools to stay aligned.
+Note that buffer-scoped explorers (oil.nvim, netrw, etc.) will show the
+vault directory when a vault note is the active buffer — this is normal
+explorer behavior, not a side effect of Ma.
 
 ### `root.open_from`
 

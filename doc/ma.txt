@@ -90,7 +90,6 @@ files).
       { name = "My Brain", path = "~/notes" },
     },
     root = {
-      autochdir = "lcd",
       open_from = "root",
     },
     scan = {
@@ -208,21 +207,17 @@ Behavior:
   - if no valid vault exists, Ma.nvim uses current working directory
 
 6.2 `root.autochdir`                         *ma-option-root-autochdir*
-Type: >
-  false | "lcd" | "tcd" | "cd"
-<
-Default: >
-  "lcd"
-<
-Behavior:
-  - false: do not change directory
-  - "lcd": window-local cwd
-  - "tcd": tab-local cwd
-  - "cd": global cwd
 
-Control whether Ma changes Neovim's working directory to the active root
-before major actions.
-Applied before navigation, linking, creating, and daily note operations.
+⚠️  Deprecated — no longer has any effect. Kept for backward compatibility
+only. All Ma operations use explicit absolute paths, making directory
+changes unnecessary. Furthermore, Neovim's `lcd`/`tcd`/`cd` all modify
+`vim.loop.cwd()` (the libuv process cwd), which breaks plugins that spawn
+external processes via `uv.spawn()` — notably Telescope's `find_files`.
+See: https://github.com/neovim/neovim/issues/16577
+
+Note that buffer-scoped explorers (oil.nvim, netrw, etc.) will show the
+vault directory when a vault note is the active buffer — this is normal
+explorer behavior, not a side effect of Ma.
 
 6.3 `root.open_from`                        *ma-option-root-open-from*
 Type: >

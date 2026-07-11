@@ -20,7 +20,6 @@ M._config = {
         -- If nil or {}, it uses the current working directory as the root. By default the "active" vault is the first.
     },
     root = {
-        autochdir = "lcd",
         open_from = "root",
     },
     scan = {
@@ -246,21 +245,6 @@ local function active_root()
     local v = active_vault
     if v and v.path and v.path ~= "" then return v.path end
     return normpath(vim.fn.getcwd())
-end
-
-local function maybe_chdir_to_active_root()
-    local root_cfg = M._config.root or {}
-    local mode = root_cfg.autochdir
-    if not mode or mode == false then return end
-
-    local root = active_root()
-    if not root or root == "" then return end
-
-    local esc = vim.fn.fnameescape(root)
-    if mode == "lcd" then vim.cmd("lcd " .. esc)
-    elseif mode == "tcd" then vim.cmd("tcd " .. esc)
-    elseif mode == "cd" then vim.cmd("cd " .. esc)
-    end
 end
 
 --==============================================================
@@ -979,7 +963,6 @@ local function open_or_create_note(opts, cwd, done)
 end
 
 local function create_note_flexible(cwd, prefix_hint, done)
-    maybe_chdir_to_active_root()
     open_or_create_note({ prefix_hint = prefix_hint, ask_desc = true }, cwd, function(res)
         done(res and res.created or false)
     end)
@@ -1005,7 +988,6 @@ local function daily_note_full_and_stamp()
 end
 
 local function open_or_create_daily(cwd, done)
-    maybe_chdir_to_active_root()
     local note_full, stamp = daily_note_full_and_stamp()
     if not note_full then
         vim.notify("[Ma] daily notes are disabled (daily_notes=false)", vim.log.levels.WARN)
@@ -1116,7 +1098,6 @@ local function get_visual_selection_range_and_text()
 end
 
 local function ma_link_from_visual()
-    maybe_chdir_to_active_root()
     local cwd = active_root()
 
     -- Must be a managed note (so "same root/folder/path" makes sense)
@@ -1923,7 +1904,6 @@ function M.navigate()
     if cfg.open_from == "current" then
         cfg.start_stack = current_level_stack(cfg.cwd)
     end
-    maybe_chdir_to_active_root()
     navigator(cfg)
 end
 
