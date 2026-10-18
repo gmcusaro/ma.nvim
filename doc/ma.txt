@@ -17,18 +17,19 @@ CONTENTS                                                     *ma-contents*
 5. Picker Behavior .................................. |ma-picker-behavior|
 6. Configuration Reference........................... |ma-configuration-reference|
    6.1 vaults ....................................... |ma-option-vaults|
-   6.2 root.autochdir ............................... |ma-option-root-autochdir|
-   6.3 root.open_from ............................... |ma-option-root-open-from|
-   6.4 scan.respect_gitignore ....................... |ma-option-scan-respect-gitignore|
-   6.5 scan.depth ................................... |ma-option-scan-depth|
-   6.6 notes.delete_to_trash ........................ |ma-option-notes-delete-to-trash|
-   6.7 picker.actions ............................... |ma-option-picker-actions|
-   6.8 notes.date_format_frontmatter ................ |ma-option-notes-date-format-frontmatter|
-   6.9 picker.telescope ............................. |ma-option-picker-telescope|
-   6.10 picker.columns .............................. |ma-option-picker-columns|
-   6.11 picker.sort ................................. |ma-option-picker-sort|
-   6.12 daily_notes ................................. |ma-option-daily-notes|
+   6.2 root.open_from ............................... |ma-option-root-open-from|
+   6.3 scan.respect_gitignore ....................... |ma-option-scan-respect-gitignore|
+   6.4 scan.depth ................................... |ma-option-scan-depth|
+   6.5 notes.delete_to_trash ........................ |ma-option-notes-delete-to-trash|
+   6.6 picker.actions ............................... |ma-option-picker-actions|
+   6.7 notes.date_format_frontmatter ................ |ma-option-notes-date-format-frontmatter|
+   6.8 picker.telescope ............................. |ma-option-picker-telescope|
+   6.9 picker.columns ............................... |ma-option-picker-columns|
+   6.10 picker.sort ................................. |ma-option-picker-sort|
+   6.11 daily_notes ................................. |ma-option-daily-notes|
+   6.12 ui.prompt_backend ........................... |ma-option-ui-prompt-backend|
 7. Frontmatter ...................................... |ma-frontmatter|
+8. Public API ...................................... |ma-api|
 
 ==============================================================================
 1. Overview                                                    *ma-overview*
@@ -113,7 +114,10 @@ files).
     daily_notes = {
       date_format = nil,
       locale = nil,
-    }
+    },
+    ui = {
+      prompt_backend = "cmdline",
+    },
   })
 <
 
@@ -123,6 +127,9 @@ files).
 :Ma                                                             *:Ma*
     Open the Telescope navigator for the active root. Use it to browse notes as
     a dot-based tree and run picker actions.
+
+    For a one-off override of |ma-option-root-open-from|, call |M.navigate()|
+    directly with an {opts} table instead of using this command.
 
 :Ma vault                                                       *:Ma-vault*
     Open the vault picker and switch the active vault.
@@ -206,32 +213,28 @@ Behavior:
   - first valid vault becomes active by default
   - if no valid vault exists, Ma.nvim uses current working directory
 
-6.2 `root.autochdir`                         *ma-option-root-autochdir*
-
-⚠️  Deprecated — no longer has any effect. Kept for backward compatibility
-only. All Ma operations use explicit absolute paths, making directory
-changes unnecessary. Furthermore, Neovim's `lcd`/`tcd`/`cd` all modify
-`vim.loop.cwd()` (the libuv process cwd), which breaks plugins that spawn
-external processes via `uv.spawn()` — notably Telescope's `find_files`.
-See: https://github.com/neovim/neovim/issues/16577
-
-Note that buffer-scoped explorers (oil.nvim, netrw, etc.) will show the
-vault directory when a vault note is the active buffer — this is normal
-explorer behavior, not a side effect of Ma.
-
-6.3 `root.open_from`                        *ma-option-root-open-from*
+6.2 `root.open_from`                        *ma-option-root-open-from*
 Type: >
   "root" | "current"
-<
+
 Default: >
   "root"
-<
+
 Behavior:
   - "root": open the navigator at the active root
   - "current": open at the current managed note level, or the current cwd
     level when it is inside the active root
 
-6.4 `scan.respect_gitignore`      *ma-option-scan-respect-gitignore*
+This is the *default* behavior, used by `:Ma` and by |ma.navigate()| when
+called with no arguments. It can be overridden for a single call without
+changing the config — see |ma.navigate()|.
+
+Example: >
+  root = {
+    open_from = "current",
+  }
+
+6.3 `scan.respect_gitignore`      *ma-option-scan-respect-gitignore*
 Type: >
   boolean
 <
@@ -241,7 +244,7 @@ Default: >
 Behavior:
   Control whether scans exclude files ignored by `.gitignore`.
 
-6.5 `scan.depth`                                *ma-option-scan-depth*
+6.4 `scan.depth`                                *ma-option-scan-depth*
 Type: >
   integer | nil
 <
@@ -254,7 +257,7 @@ Behavior:
 
 Use when the vault is large and you want faster scans.
 
-6.6 `notes.delete_to_trash`            *ma-option-notes-delete-to-trash*
+6.5 `notes.delete_to_trash`            *ma-option-notes-delete-to-trash*
 Type: >
   boolean
 <
@@ -265,7 +268,7 @@ Behavior:
   When true, Ma tries OS trash tools first (`osascript` on macOS, `gio`,
   `trash-put`, `kioclient5`) and falls back to file removal.
 
-6.7 `picker.actions`                        *ma-option-picker-actions*
+6.6 `picker.actions`                        *ma-option-picker-actions*
 Type: >
   { { string, "create"|"rename"|"delete" } } | false
 <
@@ -294,7 +297,7 @@ picker = {
 Use when:
 - You want custom action keys in Telescope.
 
-6.8 `notes.date_format_frontmatter`
+6.7 `notes.date_format_frontmatter`
                                   *ma-option-notes-date-format-frontmatter*
 Type: >
   string
@@ -316,7 +319,7 @@ notes = {
 }
 ```
 
-6.9 `picker.telescope`                 *ma-option-picker-telescope*
+6.8 `picker.telescope`                 *ma-option-picker-telescope*
 Type: >
   table
 <
@@ -329,7 +332,7 @@ Behavior:
   `initial_mode` accepts only `"insert"` or `"normal"`.
   Other Telescope keys are ignored by Ma.nvim.
 
-6.10 `picker.columns`                    *ma-option-picker-columns*
+6.9 `picker.columns`                    *ma-option-picker-columns*
 Type: >
   table
 <
@@ -373,7 +376,7 @@ Behavior:
   - without a custom `file` icon, Ma uses `nvim-web-devicons` when
     available, else fallback `󰈙`
 
-6.11 `picker.sort`                          *ma-option-picker-sort*
+6.10 `picker.sort`                          *ma-option-picker-sort*
 Type: >
   { by?: "name"|"update"|"creation", order?: "asc"|"desc" }
 <
@@ -386,7 +389,7 @@ Behavior:
   - `creation`: birthtime/ctime fallback
   - ties fall back to full note path for deterministic order
 
-6.12 `daily_notes`                                *ma-option-daily-notes*
+6.11 `daily_notes`                                *ma-option-daily-notes*
 Type: >
   table | false
 <
@@ -417,6 +420,25 @@ Default: >
 Behavior:
   Temporarily sets `os.setlocale(locale, "time")` while formatting the daily date.
 
+6.12 `ui.prompt_backend`           *ma-option-ui-prompt-backend*
+Type: >
+  "cmdline" | "ui"
+<
+Default: >
+  "cmdline"
+<
+Behavior:
+  Prompt backend used for Ma's name/title/description input prompts.
+  - "cmdline": prompts via `vim.fn.input` (built-in command line)
+  - "ui": prompts via `vim.ui.input` (pluggable — e.g. dressing.nvim,
+    noice.nvim)
+
+Example: >
+  ui = {
+    prompt_backend = "ui",
+  }
+<
+
 ==============================================================================
 7. Frontmatter                                              *ma-frontmatter*
 
@@ -443,3 +465,65 @@ Behavior:
     indexing or linking
 
 ==============================================================================
+8. Public API                                                  *ma-api*
+
+Each function mirrors the corresponding `:Ma` command — see section 4
+for full behavioral documentation.
+
+                                                          *M.navigate()*
+M.navigate()
+    See |:Ma|. Accepts an optional {opts} table to override
+    |ma-option-root-open-from| for this single call only: >
+      require("ma").navigate({ open_from = "current" })
+
+                                                          *M.link()*
+M.link()
+    See |:Ma-link|.
+
+                                                          *M.create()*
+M.create()
+    See |:Ma-create|.
+
+                                                          *M.daily()*
+M.daily()
+    See |:Ma-daily|.
+
+                                                          *M.rename()*
+M.rename()
+    See |:Ma-rename|.
+
+                                                          *M.delete()*
+M.delete()
+    See |:Ma-delete|.
+
+                                                          *M.vault()*
+M.vault([name])
+    See |:Ma-vault| and |:Ma-vault-name|.
+
+                                                          *M.follow_link()*
+M.follow_link()
+    Follow a markdown link under the cursor with correct path resolution.
+    Introduced because markdown.nvim's built-in `open_path` does not handle
+    bare filenames or paths starting with `/`.
+
+    Implementation: on the first markdown buffer, Ma patches markdown.nvim's
+    |hooks.follow_link| (its documented hook), so markdown.nvim's own
+    `link_follow` mapping (e.g. `<CR>`) keeps acting as the trigger while Ma
+    only corrects path resolution. Ma does NOT add a competing `<CR>` mapping.
+    Requires markdown.nvim installed with `mappings.link_follow` set.
+
+    Resolution rules (applied by the hook):
+    - `/path` is resolved relative to the **vault root** (Dendron convention).
+    - Bare filenames (no `./`, `../`, `#`, or URL prefix) are resolved
+      relative to the **buffer directory** first, falling back to the vault
+      root.
+    - All other forms (`./`, `../`, `#heading`, URLs) fall through to
+      markdown.nvim's default follow (open_path / browser / heading).
+
+    `M.follow_link()` itself calls markdown.nvim's follow, so it can be bound
+    to a custom key. To bind a different key: >
+      vim.keymap.set("n", "gx", require("ma").follow_link, { desc = "Ma: follow link" })
+<
+
+==============================================================================
+

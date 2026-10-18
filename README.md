@@ -114,6 +114,9 @@ require("ma").setup({
     date_format = nil,
     locale = nil,
   },
+  ui = {
+    prompt_backend = "cmdline",
+  },
 })
 ```
 
@@ -247,23 +250,9 @@ Important:
 Use when:
 - You want explicit, switchable note roots.
 
-### `root.autochdir`
-
-⚠️ **Deprecated** — no longer has any effect. Kept for backward compatibility only.
-
-All Ma operations use explicit absolute paths, making directory changes
-unnecessary. Neovim's `lcd`/`tcd`/`cd` all modify `vim.loop.cwd()` (the
-libuv process cwd), which breaks plugins that spawn external processes via
-`uv.spawn()` — notably Telescope's `find_files`.
-See: https://github.com/neovim/neovim/issues/16577
-
-Note that buffer-scoped explorers (oil.nvim, netrw, etc.) will show the
-vault directory when a vault note is the active buffer — this is normal
-explorer behavior, not a side effect of Ma.
-
 ### `root.open_from`
 
-Control where the navigator opens inside the active root.
+Control the **default** location where the navigator opens inside the active root.
 
 Type:
 - `"root" | "current"`
@@ -272,11 +261,10 @@ Default:
 - `"root"`
 
 Behavior:
-- `"root"`: always open the navigator at the active root.
-- `"current"`: open the navigator at the current managed note level, or the current cwd level when it is inside the active root.
+- `"root"`: opens the navigator at the active root.
+- `"current"`: opens the navigator at the current managed note level, or the current cwd level when it is inside the active root.
 
 Example:
-
 ```lua
 root = {
   open_from = "current",
@@ -284,7 +272,20 @@ root = {
 ```
 
 Use when:
-- You want `:Ma` to reopen where you already are working instead of always jumping back to the root.
+- You want `:Ma` (and any `navigate()` call without an explicit override) to reopen where you already are working instead of always jumping back to the root.
+
+> **Per-call override**: `M.navigate()` accepts an optional `opts.open_from` that overrides this setting for that single call, without changing the global default. Useful if you want two separate keymaps — one that always opens at root, one that always opens at the current level:
+> ```lua
+> local ma = require("ma")
+>
+> -- uses the configured default (root.open_from)
+> vim.keymap.set("n", "<leader>nn", ma.navigate, { desc = "Ma: navigate" })
+>
+> -- always opens at the current level, regardless of config
+> vim.keymap.set("n", "<leader>nN", function()
+>     ma.navigate({ open_from = "current" })
+> end, { desc = "Ma: navigate (current level)" })
+> ```
 
 ### `scan.respect_gitignore`
 
@@ -673,6 +674,31 @@ daily_notes = { locale = "it_IT.UTF-8" }
 Use when:
 - You want month/day names in a specific language.
 
+### `ui.prompt_backend`
+
+Prompt backend used for Ma's name/title/description input prompts.
+
+Type:
+- `"cmdline" | "ui"`
+
+Default:
+- `"cmdline"`
+
+Behavior:
+- `"cmdline"`: prompts via `vim.fn.input` (built-in command line).
+- `"ui"`: prompts via `vim.ui.input` (pluggable — e.g. dressing.nvim, noice.nvim).
+
+Example:
+
+```lua
+ui = {
+  prompt_backend = "ui",
+}
+```
+
+Use when:
+- You want Ma prompts routed through your `vim.ui.input` implementation.
+
 ## Frontmatter
 
 When creating a new note via `:Ma create` or `:Ma daily`,
@@ -695,6 +721,49 @@ Behavior:
 - `updated` is only modified if frontmatter exists and contains an `updated:` field.
 - Notes without frontmatter are left untouched.
 - `id` is generated automatically and is not currently used for indexing or linking.
+
+## Public API
+
+All public functions live under `require("ma")`. Use them to bind Ma
+actions to custom keymaps without going through the `:Ma` command.
+
+| Function | Equivalent to |
+|---|---|
+| `M.navigate()` | `:Ma` |
+| `M.navigate({ open_from = "root" })` | *(no `:Ma` equivalent — forces `root.open_from = "root"` for this call)* |
+| `M.navigate({ open_from = "current" })` | *(no `:Ma` equivalent — forces `root.open_from = "current"` for this call)* |
+| `M.link()` | `:Ma link` |
+| `M.create()` | `:Ma create` |
+| `M.daily()` | `:Ma daily` |
+| `M.rename()` | `:Ma rename` |
+| `M.delete()` | `:Ma delete` |
+| `M.vault()` | `:Ma vault` |
+| `M.vault(name)` | `:Ma vault {name}` |
+| `M.follow_link()` | follows a markdown link under cursor (delegates to markdown.nvim, patching its path resolution) |
+
+`M.follow_link()` fixes path resolution that markdown.nvim's built-in `open_path`
+gets wrong, without touching keymaps. On the first markdown buffer, Ma patches
+markdown.nvim's `hooks.follow_link` so that:
+- `/path` → resolved relative to the **vault root** (Dendron convention)
+- bare filenames → resolved relative to the **buffer's directory**, falling back to vault root
+- Everything else (`./`, `../`, `#heading`, URLs) → handled by markdown.nvim's default
+
+This means markdown.nvim's own `link_follow` mapping (e.g. `<CR>`) acts as the
+trigger; Ma does not add a competing `<CR>` mapping. Requires markdown.nvim
+installed with `mappings.link_follow` set.
+
+Example:
+
+```lua
+vim.keymap.set("n", "<leader>mn", require("ma").navigate)
+vim.keymap.set("n", "<leader>mc", require("ma").create)
+vim.keymap.set("n", "<leader>md", require("ma").daily)
+vim.keymap.set("x", "<leader>ml", require("ma").link)   -- visual mode
+-- Optional: a custom key that runs the same follow (markdown.nvim's <CR> also works):
+vim.keymap.set("n", "gx", require("ma").follow_link, { desc = "Ma: follow link" })
+```
+
+Each function is also available via the `:Ma` command — see [Commands](#commands) for details on behavior and options.
 
 ## Contributing
 

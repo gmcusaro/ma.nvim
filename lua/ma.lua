@@ -1899,9 +1899,22 @@ function M._runtime_cfg()
     }
 end
 
-function M.navigate()
+-- opts.open_from ("root" | "current") overrides root.open_from for this call
+-- only; omit it (or pass nil) to use the configured default. Bindable
+-- directly, e.g.:
+--   vim.keymap.set("n", "<leader>nN", function()
+--       require("ma").navigate({ open_from = "current" })
+--   end)
+function M.navigate(opts)
+    opts = opts or {}
     local cfg = M._runtime_cfg()
-    if cfg.open_from == "current" then
+
+    local open_from = opts.open_from
+    if open_from ~= "root" and open_from ~= "current" then
+        open_from = cfg.open_from
+    end
+
+    if open_from == "current" then
         cfg.start_stack = current_level_stack(cfg.cwd)
     end
     navigator(cfg)
@@ -1909,6 +1922,91 @@ end
 
 function M.link()
     ma_link_from_visual()
+end
+
+-- Creates (prompting for name/title/desc) a new note under the current
+-- buffer's folder, then opens it. Bindable directly, e.g.:
+--   vim.keymap.set("n", "<leader>nc", require("ma").create)
+function M.create()
+    local cwd = active_root()
+    local prefix = note_parent_prefix_from_buf(cwd)
+    create_note_flexible(cwd, prefix, function() end)
+end
+
+-- Opens (creating if needed) today's daily note.
+function M.daily()
+    local cwd = active_root()
+    open_or_create_daily(cwd, function() end)
+end
+
+-- Renames the note backing the current buffer.
+M.rename = actions.rename_current_buffer
+
+-- Deletes (or trashes, per config) the note backing the current buffer.
+M.delete = actions.delete_current_buffer
+
+-- Follows a markdown link under the cursor with correct path resolution.
+-- Handles: headings (#), URLs, absolute (/), relative (./, ../),
+-- and bare filenames (resolved relative to buffer dir, then vault root).
+-- Designed to replace markdown.nvim's broken open_path resolution.
+-- Does NOT modify cwd, so Telescope and uv.spawn() users are unaffected.
+-- Fix markdown link resolution by hooking into markdown.nvim's follow.
+-- markdown.nvim already extracts the destination injection-aware, but its
+-- open_path mishandles two Ma conventions; we fix only those and delegate
+-- everything else (./ ../ #heading URLs) back to markdown.nvim.
+local function ma_follow_hook(opts, default)
+    local dest = opts.dest
+    if not dest or dest == "" then return default() end
+
+    -- Headings and URLs: markdown.nvim handles them correctly
+    if vim.startswith(dest, "#")
+        or dest:match("^https?://") or dest:match("^www%.") then
+        return default()
+    end
+
+    local path = dest:match("^(.-)#") or dest -- strip optional #anchor
+    local root = active_root()
+    local target
+
+    if vim.startswith(path, "/") then
+        target = root .. "/" .. path:sub(2)             -- /path -> vault root
+    elseif not vim.startswith(path, ".") then
+        -- bare filename: buffer dir first, then vault root
+        local buf_dir = vim.fs.dirname(vim.api.nvim_buf_get_name(0))
+        for _, dir in ipairs({ buf_dir, root }) do
+            local candidate = vim.fs.normalize(dir .. "/" .. path)
+            if vim.fn.filereadable(candidate) == 1 then
+                target = candidate
+                break
+            end
+        end
+    end
+
+    if target then
+        target = vim.fs.normalize(target)
+        if vim.fn.filereadable(target) == 1 then
+            vim.cmd.edit(vim.fn.fnameescape(target))
+            return
+        end
+    end
+
+    default()
+end
+
+-- Public wrapper: delegates to markdown.nvim's follow (which runs the hook).
+function M.follow_link()
+    local ok, md = pcall(require, "markdown.link")
+    if ok then md.follow() end
+end
+
+-- With no argument opens the vault picker; with a name, switches directly
+-- to that vault (same matching rules as `:Ma vault <name>`).
+function M.vault(name)
+    name = trim(name or "")
+    if name == "" then
+        return pick_vault()
+    end
+    return pick_vault_by_name(name)
 end
 
 --==============================================================
@@ -1924,38 +2022,33 @@ local function create_commands()
 
         if sub == "vault" then
             local target = trim(table.concat(opts.fargs or {}, " ", 2))
-            if target == "" then
-                return pick_vault()
-            end
-            return pick_vault_by_name(target)
+            return M.vault(target)
         end
 
         if sub == "daily" then
-            local cwd = active_root()
-            return open_or_create_daily(cwd, function() end)
+            return M.daily()
         end
 
         if sub == "link" then
-            return ma_link_from_visual()
+            return M.link()
         end
 
         if sub == "create" then
-            local cwd = active_root()
-            local prefix = note_parent_prefix_from_buf(cwd)
-            return create_note_flexible(cwd, prefix, function() end)
+            return M.create()
         end
 
         if sub == "rename" then
-            return actions.rename_current_buffer()
+            return M.rename()
         end
 
         if sub == "delete" then
-            return actions.delete_current_buffer()
+            return M.delete()
         end
 
         vim.notify("[Ma] unknown subcommand: " .. sub, vim.log.levels.ERROR)
     end, {
     nargs = "*",
+    range = true,
     complete = function(arglead, cmdline)
         local is_vault_arg = (cmdline or ""):match("^%s*:?[Mm][Aa]%s+vault%s+")
         if is_vault_arg then
@@ -2028,6 +2121,27 @@ M.setup = function(user_opts)
             update_frontmatter_updated(ev.buf)
         end,
         desc = "Update Dendron-style frontmatter 'updated' timestamp",
+    })
+
+    -- Fix markdown link resolution by patching markdown.nvim's follow_link
+    -- hook. The module only lands on 'runtimepath' after lazy.nvim loads the
+    -- plugin (on the first markdown FileType), so we patch on FileType +
+    -- vim.schedule to run once the plugin and its setup() are done.
+    -- Idempotent via identity check.
+    local function patch_markdown_hook()
+        local ok, mdcfg = pcall(require, "markdown.config")
+        if not ok or not mdcfg then return end
+        local cfg = mdcfg:get()
+        if cfg and cfg.hooks and cfg.hooks.follow_link ~= ma_follow_hook then
+            cfg.hooks.follow_link = ma_follow_hook
+        end
+    end
+    patch_markdown_hook() -- works if markdown.nvim is already loaded (eager)
+    vim.api.nvim_create_autocmd("FileType", {
+        group = vim.api.nvim_create_augroup("MaMarkdownHook", { clear = true }),
+        pattern = "markdown",
+        callback = function() vim.schedule(patch_markdown_hook) end,
+        desc = "Patch markdown.nvim follow_link hook",
     })
 end
 
