@@ -1061,8 +1061,19 @@ end
 local function get_visual_selection_range_and_text()
     local bufnr = vim.api.nvim_get_current_buf()
 
-    local sp = vim.fn.getpos("'<")
-    local ep = vim.fn.getpos("'>")
+    local sp, ep
+    local mode = vim.fn.mode()
+    if mode:match("^[vV\22]") then
+        -- Live visual selection: '< and '> are only set once visual mode is
+        -- left, so read the active range directly. Block visual has no linear
+        -- label, so reject it. Linewise spans whole lines.
+        if mode == "\22" then return nil end
+        sp, ep = vim.fn.getpos("v"), vim.fn.getpos(".")
+        if mode == "V" then sp[3], ep[3] = 1, math.huge end
+    else
+        sp = vim.fn.getpos("'<")
+        ep = vim.fn.getpos("'>")
+    end
     if not sp or not ep then return nil end
 
     local srow, scol = sp[2], sp[3] -- 1-based, inclusive
